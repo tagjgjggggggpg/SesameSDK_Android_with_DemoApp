@@ -5,6 +5,7 @@ import co.candyhouse.app.BuildConfig
 import co.candyhouse.sesame.open.CHBleManager
 import co.candyhouse.sesame.open.CHDeviceManager
 import co.candyhouse.sesame.open.CHScanStatus
+import co.candyhouse.sesame.open.devices.CHSesame5LiveLockState
 import co.candyhouse.sesame.open.devices.CHSesame5StrictLock
 import co.candyhouse.sesame.open.devices.base.CHDeviceLoginStatus
 import co.candyhouse.sesame.open.devices.base.CHDeviceStatus
@@ -75,24 +76,28 @@ internal class ProductionSesameGroupLockRuntime : SesameGroupLockRuntime {
 internal class SesameGroupLockGateway(private val runtime: SesameGroupLockRuntime=ProductionSesameGroupLockRuntime(), private val stateObserveTimeoutMs:Long=STATE_OBSERVE_TIMEOUT_MS, private val statePollMs:Long=STATE_POLL_MS):GroupLockGateway {
     override suspend fun operate(deviceId:String, action:GroupLockAction):DeviceOperationResult {
         val device=runtime.resolveDevice(deviceId).getOrElse{return DeviceOperationResult(deviceId,false,it.message?:"Device not found")}
-        if(!isSupportedGroupLockDevice(device)) return DeviceOperationResult(deviceId,false,"Unsupported group lock device: ${device.productModel}",effectiveState(device))
-        if(!runtime.isStrictBleTransportReady(device)){ runtime.ensureScan()?.let{return DeviceOperationResult(deviceId,false,it,effectiveState(device))}; runtime.waitForBleLogin(device)?.let{return DeviceOperationResult(deviceId,false,it,effectiveState(device))} }
+        if(!isSupportedGroupLockDevice(device)) return DeviceOperationResult(deviceId,false,"Unsupported group lock device: ${device.productModel}",liveState(device))
+        if(!runtime.isStrictBleTransportReady(device)){ runtime.ensureScan()?.let{return DeviceOperationResult(deviceId,false,it,liveState(device))}; runtime.waitForBleLogin(device)?.let{return DeviceOperationResult(deviceId,false,it,liveState(device))} }
         val target=if(action==GroupLockAction.LOCK)LockState.LOCKED else LockState.UNLOCKED
         val outcome=withTimeoutOrNull(COMMAND_TIMEOUT_MS){awaitCommand{cb->if(device !is CHSesame5StrictLock){cb(Result.failure(UnsupportedOperationException("Strict BLE lock is not supported")));return@awaitCommand};if(action==GroupLockAction.LOCK)device.strictLock(historytag=runtime.historyTag(),result=cb)else device.strictUnlock(historytag=runtime.historyTag(),result=cb)}}?:CommandOutcome.Failure(TimeoutException("BLE command timed out"))
-        return when(outcome){CommandOutcome.Success->{val observed=awaitObservedState(device,target);if(observed==target)DeviceOperationResult(deviceId,true,finalKnownState=observed)else DeviceOperationResult(deviceId,false,TARGET_NOT_CONFIRMED_ERROR,observed)};is CommandOutcome.Failure->DeviceOperationResult(deviceId,false,outcome.error.message?:outcome.error::class.java.simpleName,effectiveState(device))}
+        return when(outcome){CommandOutcome.Success->{val observed=awaitObservedState(device,target);if(observed==target)DeviceOperationResult(deviceId,true,finalKnownState=observed)else DeviceOperationResult(deviceId,false,TARGET_NOT_CONFIRMED_ERROR,observed)};is CommandOutcome.Failure->DeviceOperationResult(deviceId,false,outcome.error.message?:outcome.error::class.java.simpleName,liveState(device))}
     }
     override suspend fun getState(deviceId:String)=getDeviceSnapshot(deviceId).state
     override suspend fun getDeviceSnapshot(deviceId:String):EntranceDeviceSnapshot {
         val device=runtime.resolveDevice(deviceId).getOrNull()?:return EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false)
         if(!isSupportedGroupLockDevice(device))return EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false)
-        val state=effectiveState(device)
-        val fresh=state!=LockState.UNKNOWN
-        return EntranceDeviceSnapshot(state=state,batteryPercent=if(fresh)device.batteryPercentage else null,fresh=fresh)
+        val live=(device as? CHSesame5StrictLock)?.liveBleSnapshot()?:return EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false)
+        return EntranceDeviceSnapshot(
+            state=when(live.lockState){CHSesame5LiveLockState.LOCKED->LockState.LOCKED;CHSesame5LiveLockState.UNLOCKED->LockState.UNLOCKED},
+            batteryPercent=live.batterySample?.percentage,
+            fresh=true,
+            stateObservedAtMillis=live.stateObservedAtMillis,
+            batterySampleObservedAtMillis=live.batterySample?.observedAtMillis,
+        )
     }
     override suspend fun finishOperation(){runtime.finishOperation()}
-    private suspend fun awaitObservedState(device:CHDevices,target:LockState):LockState{withTimeoutOrNull(stateObserveTimeoutMs){while(bleState(device)!=target)delay(statePollMs)};return bleState(device)}
-    private fun bleState(device:CHDevices)=when(device.deviceStatus){CHDeviceStatus.Locked->LockState.LOCKED;CHDeviceStatus.Unlocked,CHDeviceStatus.Moved->LockState.UNLOCKED;else->LockState.UNKNOWN}
-    private fun effectiveState(device:CHDevices):LockState{val local=bleState(device);if(local!=LockState.UNKNOWN)return local;return when(device.deviceShadowStatus){CHDeviceStatus.Locked->LockState.LOCKED;CHDeviceStatus.Unlocked,CHDeviceStatus.Moved->LockState.UNLOCKED;else->LockState.UNKNOWN}}
+    private suspend fun awaitObservedState(device:CHDevices,target:LockState):LockState{withTimeoutOrNull(stateObserveTimeoutMs){while(liveState(device)!=target)delay(statePollMs)};return liveState(device)}
+    private fun liveState(device:CHDevices):LockState=when((device as? CHSesame5StrictLock)?.liveBleSnapshot()?.lockState){CHSesame5LiveLockState.LOCKED->LockState.LOCKED;CHSesame5LiveLockState.UNLOCKED->LockState.UNLOCKED;null->LockState.UNKNOWN}
     private suspend fun awaitCommand(block:(CHResult<CHEmpty>)->Unit):CommandOutcome=suspendCancellableCoroutine{c->try{block(callback@{r->if(!c.isActive)return@callback;r.fold(onSuccess={c.resume(CommandOutcome.Success)},onFailure={c.resume(CommandOutcome.Failure(it))})})}catch(e:CancellationException){c.cancel(e)}catch(e:Throwable){if(c.isActive)c.resume(CommandOutcome.Failure(e))}}
     private sealed interface CommandOutcome{data object Success:CommandOutcome;data class Failure(val error:Throwable):CommandOutcome}
     companion object{internal const val TARGET_NOT_CONFIRMED_ERROR="command accepted but target state was not confirmed";private const val COMMAND_TIMEOUT_MS=8_000L;private const val STATE_OBSERVE_TIMEOUT_MS=1_500L;private const val STATE_POLL_MS=50L}
