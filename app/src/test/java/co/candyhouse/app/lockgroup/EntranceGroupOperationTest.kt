@@ -23,18 +23,20 @@ class EntranceGroupOperationTest {
         assertEquals(listOf(GroupLockAction.UNLOCK, GroupLockAction.UNLOCK, GroupLockAction.UNLOCK), gateway.actions)
     }
 
-    @Test fun busyGate_preventsSecondEntryPointFromSendingCommands() = runBlocking {
-        val entered = CompletableDeferred<Unit>()
-        val release = CompletableDeferred<Unit>()
-        val gateway = BlockingGateway(entered, release)
-        val group = LockGroup("entrance", "玄関", listOf("a"))
-        val first = async { executeEntranceGroupAction(GroupLockController(gateway), group, GroupLockAction.LOCK) }
-        entered.await()
-        val second = executeEntranceGroupAction(GroupLockController(gateway), group, GroupLockAction.UNLOCK)
-        assertEquals(GroupOperationStatus.BUSY, second.status)
-        assertEquals(listOf(GroupLockAction.LOCK), gateway.actions)
-        release.complete(Unit)
-        first.await()
+    @Test fun busyGate_preventsSecondEntryPointFromSendingCommands() {
+        runBlocking {
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val gateway = BlockingGateway(entered, release)
+            val group = LockGroup("entrance", "玄関", listOf("a"))
+            val first = async { executeEntranceGroupAction(GroupLockController(gateway), group, GroupLockAction.LOCK) }
+            entered.await()
+            val second = executeEntranceGroupAction(GroupLockController(gateway), group, GroupLockAction.UNLOCK)
+            assertEquals(GroupOperationStatus.BUSY, second.status)
+            assertEquals(listOf(GroupLockAction.LOCK), gateway.actions)
+            release.complete(Unit)
+            first.await()
+        }
     }
 
     private class RecordingGateway(private val states: Map<String, LockState>) : GroupLockGateway {
