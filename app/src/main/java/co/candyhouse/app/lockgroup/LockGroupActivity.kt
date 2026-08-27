@@ -192,15 +192,8 @@ class LockGroupActivity : AppCompatActivity() {
                         continuation.resume(state.data.filter(::isSupportedDoorLock))
                     }
                 }
-                result.onFailure { error ->
-                    if (continuation.isActive) {
-                        continuation.resume(emptyList())
-                        Toast.makeText(
-                            this@LockGroupActivity,
-                            error.message ?: "ロック一覧を取得できませんでした",
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    }
+                result.onFailure {
+                    if (continuation.isActive) continuation.resume(emptyList())
                 }
             }
         }
