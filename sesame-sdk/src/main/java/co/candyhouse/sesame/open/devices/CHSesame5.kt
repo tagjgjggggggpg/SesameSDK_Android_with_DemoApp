@@ -7,25 +7,30 @@ import co.candyhouse.sesame.utils.CHResult
 import co.candyhouse.sesame.utils.bytesToShort
 import co.candyhouse.sesame.utils.bytesToUShort
 
-interface CHSesame5 : CHSesameLock {
+/**
+ * Optional capability for callers that require an explicit BLE-only lock path.
+ * Implementations must never fall back to toggle or IoT from these methods.
+ *
+ * The default implementation fails closed so adding this capability does not
+ * force third-party CHSesame5 implementations to change their existing
+ * lock/unlock behavior.
+ */
+interface CHSesame5StrictLock {
+    fun strictLock(historytag: ByteArray? = null, result: CHResult<CHEmpty>) {
+        result.invoke(Result.failure(UnsupportedOperationException("Strict BLE lock is not supported")))
+    }
+
+    fun strictUnlock(historytag: ByteArray? = null, result: CHResult<CHEmpty>) {
+        result.invoke(Result.failure(UnsupportedOperationException("Strict BLE unlock is not supported")))
+    }
+}
+
+interface CHSesame5 : CHSesameLock, CHSesame5StrictLock {
     var mechSetting: CHSesame5MechSettings?
     var opsSetting: CHSesame5OpsSettings?
     fun lock(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
     fun unlock(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
     fun toggle(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
-
-    /**
-     * BLE-only explicit lock operation. Unlike [lock], this method never falls
-     * back to IoT or toggle when BLE is unavailable.
-     */
-    fun strictLock(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
-
-    /**
-     * BLE-only explicit unlock operation. Unlike [unlock], this method never
-     * falls back to IoT or toggle when BLE is unavailable.
-     */
-    fun strictUnlock(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
-
     fun magnet(result: CHResult<CHEmpty>)
     fun configureLockPosition(lockTarget: Short, unlockTarget: Short, result: CHResult<CHEmpty>)
     fun autolock(delay: Int, result: CHResult<Int>)
