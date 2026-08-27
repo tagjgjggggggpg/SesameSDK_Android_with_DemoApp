@@ -13,6 +13,7 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import co.candyhouse.app.R
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -63,6 +64,8 @@ class EntranceGroupOperationService : Service() {
             val controller = GroupLockController(SesameGroupLockGateway())
             val result = try {
                 executeEntranceGroupAction(controller, group, action)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (error: Throwable) {
                 GroupOperationResult(
                     groupId = group.id,
@@ -134,10 +137,8 @@ class EntranceGroupOperationService : Service() {
     }
 
     private fun refreshTiles() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            TileService.requestListeningState(this, ComponentName(this, EntranceQuickSettingsTileService::class.java))
-            TileService.requestListeningState(this, ComponentName(this, EntranceUnlockQuickSettingsTileService::class.java))
-        }
+        TileService.requestListeningState(this, ComponentName(this, EntranceQuickSettingsTileService::class.java))
+        TileService.requestListeningState(this, ComponentName(this, EntranceUnlockQuickSettingsTileService::class.java))
     }
 
     companion object {
