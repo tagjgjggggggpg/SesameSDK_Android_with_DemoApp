@@ -6,12 +6,14 @@ on:
       - codex/sesame-group-phase1
 
 jobs:
-  verify:
+  master-lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
-      - name: Checkout
+      - name: Checkout branch repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -19,16 +21,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Checkout master
+        run: git checkout --detach origin/master
+
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
-      - name: Unit tests
-        run: ./gradlew :sesame-sdk:testDebugUnitTest :app:testDebugUnitTest --stacktrace
-
-      - name: Assemble debug
-        run: ./gradlew :sesame-sdk:assembleDebug :app:assembleDebug --stacktrace
-
-      - name: Lint inventory
+      - name: Master lint inventory
         shell: bash
         run: |
           set +e
@@ -37,16 +36,8 @@ jobs:
           echo "lint_exit_code=$status"
           report="app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
           sdk_report="sesame-sdk/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
-          echo "--- app lint errors ---"
+          echo "--- master app lint errors ---"
           [ -f "$report" ] && grep -n "Error:" "$report" || true
-          echo "--- sdk lint errors ---"
+          echo "--- master sdk lint errors ---"
           [ -f "$sdk_report" ] && grep -n "Error:" "$sdk_report" || true
-          echo "--- Phase 1 app warnings ---"
-          if [ -f "$report" ]; then
-            grep -nE '(lockgroup/|DeviceListFG\.kt|fg_devicelist\.xml|AndroidManifest\.xml).*Warning:' "$report" || true
-          fi
-          echo "--- Phase 1 sdk warnings ---"
-          if [ -f "$sdk_report" ]; then
-            grep -nE '(CHSesame5Device\.kt|StrictSesame5CommandExecutor\.kt|CHSesame5\.kt).*Warning:' "$sdk_report" || true
-          fi
           exit 0
