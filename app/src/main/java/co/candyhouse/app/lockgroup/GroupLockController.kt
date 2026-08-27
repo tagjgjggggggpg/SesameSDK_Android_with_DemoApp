@@ -30,7 +30,6 @@ class GroupLockController(
     private val gateway: GroupLockGateway,
     private val interDeviceDelayMs: Long = 500L,
     private val delayBetweenDevices: suspend (Long) -> Unit = { delay(it) },
-    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun lockGroup(group: LockGroup): GroupOperationResult = operate(group, GroupLockAction.LOCK)
     suspend fun unlockGroup(group: LockGroup): GroupOperationResult = operate(group, GroupLockAction.UNLOCK)
@@ -40,11 +39,12 @@ class GroupLockController(
         val devices = group.deviceIds.take(2).map { id ->
             try { gateway.getDeviceSnapshot(id) } catch (_: Throwable) { EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false) }
         }
-        return EntranceGroupStateSnapshot(
-            deviceA = devices.getOrNull(0) ?: EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false),
-            deviceB = devices.getOrNull(1) ?: EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false),
-            capturedAt = nowMillis(),
-        )
+        val a = devices.getOrNull(0) ?: EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false)
+        val b = devices.getOrNull(1) ?: EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false)
+        val capturedAt = listOf(a, b)
+            .mapNotNull { it.stateObservedAtMillis.takeIf { _ -> it.fresh && it.state != LockState.UNKNOWN } }
+            .maxOrNull() ?: 0L
+        return EntranceGroupStateSnapshot(a, b, capturedAt)
     }
 
     private suspend fun operate(group: LockGroup, action: GroupLockAction): GroupOperationResult {
