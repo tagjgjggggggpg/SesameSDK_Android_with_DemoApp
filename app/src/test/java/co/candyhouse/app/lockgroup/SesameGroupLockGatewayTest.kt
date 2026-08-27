@@ -1,7 +1,6 @@
 package co.candyhouse.app.lockgroup
 
 import android.bluetooth.BluetoothDevice
-import co.candyhouse.sesame.ble.SesameItemCode
 import co.candyhouse.sesame.open.devices.CHSesame5
 import co.candyhouse.sesame.open.devices.CHSesame5MechSettings
 import co.candyhouse.sesame.open.devices.CHSesame5OpsSettings
