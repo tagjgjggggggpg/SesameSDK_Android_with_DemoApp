@@ -15,6 +15,7 @@ import co.candyhouse.sesame.open.devices.CHSesame5
 import co.candyhouse.sesame.open.devices.CHSesame5MechSettings
 import co.candyhouse.sesame.open.devices.CHSesame5MechStatus
 import co.candyhouse.sesame.open.devices.CHSesame5OpsSettings
+import co.candyhouse.sesame.open.devices.CHSesame5StrictLock
 import co.candyhouse.sesame.open.devices.base.CHDeviceLoginStatus
 import co.candyhouse.sesame.open.devices.base.CHDeviceStatus
 import co.candyhouse.sesame.open.devices.base.CHSesameOS3LockBase
@@ -31,7 +32,10 @@ import co.candyhouse.sesame.utils.toHexString
 import co.candyhouse.sesame.utils.toReverseBytes
 
 @SuppressLint("MissingPermission")
-internal class CHSesame5Device : CHSesameOS3LockBase(), CHSesame5 {
+internal class CHSesame5Device(
+    private val strictBleAvailability: ((CHResult<CHEmpty>) -> Boolean)? = null,
+    private val strictCommandSink: ((SesameItemCode, ByteArray?, CHResult<CHEmpty>) -> Unit)? = null,
+) : CHSesameOS3LockBase(), CHSesame5, CHSesame5StrictLock {
 
     override var mechSetting: CHSesame5MechSettings? = null
     override var opsSetting: CHSesame5OpsSettings? = null
@@ -188,16 +192,28 @@ internal class CHSesame5Device : CHSesameOS3LockBase(), CHSesame5 {
 
     override fun strictUnlock(historytag: ByteArray?, result: CHResult<CHEmpty>) {
         StrictSesame5CommandExecutor(
-            isBleAvailable = { isBleAvailable(result) },
-            sendCommand = { itemCode -> sendStrictBleCommand(itemCode, historytag, result) }
+            isBleAvailable = { strictBleAvailability?.invoke(result) ?: isBleAvailable(result) },
+            sendCommand = { itemCode -> dispatchStrictBleCommand(itemCode, historytag, result) }
         ).unlock()
     }
 
     override fun strictLock(historytag: ByteArray?, result: CHResult<CHEmpty>) {
         StrictSesame5CommandExecutor(
-            isBleAvailable = { isBleAvailable(result) },
-            sendCommand = { itemCode -> sendStrictBleCommand(itemCode, historytag, result) }
+            isBleAvailable = { strictBleAvailability?.invoke(result) ?: isBleAvailable(result) },
+            sendCommand = { itemCode -> dispatchStrictBleCommand(itemCode, historytag, result) }
         ).lock()
+    }
+
+    private fun dispatchStrictBleCommand(
+        itemCode: SesameItemCode,
+        historytag: ByteArray?,
+        result: CHResult<CHEmpty>
+    ) {
+        strictCommandSink?.let { sink ->
+            sink(itemCode, historytag, result)
+            return
+        }
+        sendStrictBleCommand(itemCode, historytag, result)
     }
 
     private fun sendStrictBleCommand(

@@ -1,5 +1,6 @@
 package co.candyhouse.app.lockgroup
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -9,13 +10,21 @@ interface GroupLockGateway {
     suspend fun finishOperation() {}
 }
 
+private object ProcessWideGroupOperationGate {
+    private val inFlight = AtomicBoolean(false)
+
+    fun tryAcquire(): Boolean = inFlight.compareAndSet(false, true)
+
+    fun release() {
+        inFlight.set(false)
+    }
+}
+
 class GroupLockController(
     private val gateway: GroupLockGateway,
     private val interDeviceDelayMs: Long = 500L,
     private val delayBetweenDevices: suspend (Long) -> Unit = { delay(it) },
 ) {
-    private val inFlight = AtomicBoolean(false)
-
     suspend fun lockGroup(group: LockGroup): GroupOperationResult = operate(group, GroupLockAction.LOCK)
 
     suspend fun unlockGroup(group: LockGroup): GroupOperationResult = operate(group, GroupLockAction.UNLOCK)
@@ -26,7 +35,7 @@ class GroupLockController(
     }
 
     private suspend fun operate(group: LockGroup, action: GroupLockAction): GroupOperationResult {
-        if (!inFlight.compareAndSet(false, true)) {
+        if (!ProcessWideGroupOperationGate.tryAcquire()) {
             return GroupOperationResult(
                 groupId = group.id,
                 action = action,
@@ -51,6 +60,8 @@ class GroupLockController(
             group.deviceIds.forEachIndexed { index, deviceId ->
                 results += try {
                     gateway.operate(deviceId, action)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
                 } catch (error: Throwable) {
                     DeviceOperationResult(
                         deviceId = deviceId,
@@ -81,7 +92,7 @@ class GroupLockController(
             try {
                 gateway.finishOperation()
             } finally {
-                inFlight.set(false)
+                ProcessWideGroupOperationGate.release()
             }
         }
     }

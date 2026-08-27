@@ -47,8 +47,10 @@ data class GroupOperationResult(
 )
 
 fun aggregateGroupState(states: List<LockState>): GroupState = when {
-    states.isEmpty() || states.all { it == LockState.UNKNOWN } -> GroupState.UNKNOWN
+    states.isEmpty() -> GroupState.UNKNOWN
+    states.any { it == LockState.UNKNOWN } -> GroupState.UNKNOWN
     states.all { it == LockState.LOCKED } -> GroupState.LOCKED
     states.all { it == LockState.UNLOCKED } -> GroupState.UNLOCKED
-    else -> GroupState.MIXED
+    states.any { it == LockState.LOCKED } && states.any { it == LockState.UNLOCKED } -> GroupState.MIXED
+    else -> GroupState.UNKNOWN
 }

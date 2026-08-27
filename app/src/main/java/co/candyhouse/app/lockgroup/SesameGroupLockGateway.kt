@@ -3,129 +3,51 @@ package co.candyhouse.app.lockgroup
 import co.candyhouse.sesame.open.CHBleManager
 import co.candyhouse.sesame.open.CHDeviceManager
 import co.candyhouse.sesame.open.CHScanStatus
-import co.candyhouse.sesame.open.devices.CHSesame2
-import co.candyhouse.sesame.open.devices.CHSesame5
 import co.candyhouse.sesame.open.devices.CHSesame5StrictLock
 import co.candyhouse.sesame.open.devices.base.CHDeviceLoginStatus
 import co.candyhouse.sesame.open.devices.base.CHDeviceStatus
 import co.candyhouse.sesame.open.devices.base.CHDevices
-import co.candyhouse.sesame.open.devices.base.CHProductModel
 import co.candyhouse.sesame.utils.CHEmpty
 import co.candyhouse.sesame.utils.CHResult
 import co.receiver.widget.AutoUnlockForegroundService
 import co.utils.UserUtils
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.TimeoutException
 import kotlin.coroutines.resume
 
-class SesameGroupLockGateway : GroupLockGateway {
+internal interface SesameGroupLockRuntime {
+    suspend fun resolveDevice(deviceId: String): Result<CHDevices>
+    suspend fun ensureScan(): String?
+    suspend fun waitForBleLogin(device: CHDevices): String?
+    suspend fun finishOperation()
+    fun historyTag(): ByteArray?
+}
+
+internal class ProductionSesameGroupLockRuntime : SesameGroupLockRuntime {
     private var scanInitialized = false
     private var scanStartedByGateway = false
     private var scanError: String? = null
 
-    override suspend fun operate(deviceId: String, action: GroupLockAction): DeviceOperationResult {
-        val deviceResult = resolveDevice(deviceId)
-        val device = deviceResult.getOrElse { error ->
-            return DeviceOperationResult(
-                deviceId = deviceId,
-                success = false,
-                error = error.message ?: "Device not found",
-            )
-        }
-
-        if (!isSupportedDoorLock(device)) {
-            return DeviceOperationResult(
-                deviceId = deviceId,
-                success = false,
-                error = "Unsupported group lock device: ${device.productModel}",
-                finalKnownState = effectiveState(device),
-            )
-        }
-
-        ensureScan()?.let { error ->
-            return DeviceOperationResult(
-                deviceId = deviceId,
-                success = false,
-                error = error,
-                finalKnownState = effectiveState(device),
-            )
-        }
-
-        waitForBleLogin(device)?.let { error ->
-            return DeviceOperationResult(
-                deviceId = deviceId,
-                success = false,
-                error = error,
-                finalKnownState = effectiveState(device),
-            )
-        }
-
-        val targetState = if (action == GroupLockAction.LOCK) LockState.LOCKED else LockState.UNLOCKED
-        if (bleState(device) == targetState) {
-            return DeviceOperationResult(
-                deviceId = deviceId,
-                success = true,
-                finalKnownState = targetState,
-            )
-        }
-
-        val historyTag = UserUtils.getEnvironmentIdWithByte()
-        val outcome = withTimeoutOrNull(COMMAND_TIMEOUT_MS) {
-            awaitCommand { callback ->
-                when (device) {
-                    is CHSesame5StrictLock -> {
-                        if (action == GroupLockAction.LOCK) {
-                            device.strictLock(historytag = historyTag, result = callback)
-                        } else {
-                            device.strictUnlock(historytag = historyTag, result = callback)
-                        }
+    override suspend fun resolveDevice(deviceId: String): Result<CHDevices> =
+        suspendCancellableCoroutine { continuation ->
+            try {
+                CHDeviceManager.getCandyDeviceByUUID(deviceId) { result ->
+                    result.onSuccess { state ->
+                        if (continuation.isActive) continuation.resume(Result.success(state.data))
                     }
-
-                    is CHSesame2 -> {
-                        if (action == GroupLockAction.LOCK) {
-                            device.lock(historytag = historyTag, result = callback)
-                        } else {
-                            device.unlock(historytag = historyTag, result = callback)
-                        }
+                    result.onFailure { error ->
+                        if (continuation.isActive) continuation.resume(Result.failure(error))
                     }
-
-                    else -> callback(Result.failure(IllegalStateException("Unsupported group lock device")))
                 }
+            } catch (error: Throwable) {
+                if (continuation.isActive) continuation.resume(Result.failure(error))
             }
-        } ?: CommandOutcome.Failure(TimeoutException("BLE command timed out"))
-
-        return when (outcome) {
-            CommandOutcome.Success -> DeviceOperationResult(
-                deviceId = deviceId,
-                success = true,
-                finalKnownState = awaitObservedState(device, targetState),
-            )
-
-            is CommandOutcome.Failure -> DeviceOperationResult(
-                deviceId = deviceId,
-                success = false,
-                error = outcome.error.message ?: outcome.error::class.java.simpleName,
-                finalKnownState = effectiveState(device),
-            )
         }
-    }
 
-    override suspend fun getState(deviceId: String): LockState {
-        return resolveDevice(deviceId).getOrNull()?.let(::effectiveState) ?: LockState.UNKNOWN
-    }
-
-    override suspend fun finishOperation() {
-        if (scanStartedByGateway && !AutoUnlockForegroundService.isLive) {
-            awaitSimpleBleResult { callback -> CHBleManager.disableScan(callback) }
-        }
-        scanInitialized = false
-        scanStartedByGateway = false
-        scanError = null
-    }
-
-    private suspend fun ensureScan(): String? {
+    override suspend fun ensureScan(): String? {
         if (scanInitialized) return scanError
 
         val wasEnabled = CHBleManager.mScanning == CHScanStatus.Enable
@@ -136,7 +58,7 @@ class SesameGroupLockGateway : GroupLockGateway {
         return scanError
     }
 
-    private suspend fun waitForBleLogin(device: CHDevices): String? {
+    override suspend fun waitForBleLogin(device: CHDevices): String? {
         if (device.deviceStatus.value == CHDeviceLoginStatus.logined) return null
 
         val loggedIn = withTimeoutOrNull(LOGIN_TIMEOUT_MS) {
@@ -161,10 +83,143 @@ class SesameGroupLockGateway : GroupLockGateway {
         return if (loggedIn) null else "BLE login timed out or disconnected"
     }
 
+    override suspend fun finishOperation() {
+        val shouldDisableScan = scanStartedByGateway && !AutoUnlockForegroundService.isLive
+        scanInitialized = false
+        scanStartedByGateway = false
+        scanError = null
+
+        if (shouldDisableScan) {
+            withTimeoutOrNull(SCAN_FINISH_TIMEOUT_MS) {
+                awaitSimpleBleResult { callback -> CHBleManager.disableScan(callback) }
+            }
+        }
+    }
+
+    override fun historyTag(): ByteArray? = UserUtils.getEnvironmentIdWithByte()
+
+    private suspend fun awaitSimpleBleResult(block: (CHResult<CHEmpty>) -> Unit): Throwable? =
+        suspendCancellableCoroutine { continuation ->
+            try {
+                block(callback@{ result ->
+                    if (!continuation.isActive) return@callback
+                    continuation.resume(result.exceptionOrNull())
+                })
+            } catch (cancellation: CancellationException) {
+                continuation.cancel(cancellation)
+            } catch (error: Throwable) {
+                if (continuation.isActive) continuation.resume(error)
+            }
+        }
+
+    companion object {
+        private const val LOGIN_TIMEOUT_MS = 8_000L
+        private const val LOGIN_POLL_MS = 100L
+        private const val SCAN_FINISH_TIMEOUT_MS = 2_000L
+    }
+}
+
+internal class SesameGroupLockGateway(
+    private val runtime: SesameGroupLockRuntime = ProductionSesameGroupLockRuntime(),
+    private val stateObserveTimeoutMs: Long = STATE_OBSERVE_TIMEOUT_MS,
+    private val statePollMs: Long = STATE_POLL_MS,
+) : GroupLockGateway {
+    override suspend fun operate(deviceId: String, action: GroupLockAction): DeviceOperationResult {
+        val deviceResult = runtime.resolveDevice(deviceId)
+        val device = deviceResult.getOrElse { error ->
+            return DeviceOperationResult(
+                deviceId = deviceId,
+                success = false,
+                error = error.message ?: "Device not found",
+            )
+        }
+
+        if (!isSupportedGroupLockDevice(device)) {
+            return DeviceOperationResult(
+                deviceId = deviceId,
+                success = false,
+                error = "Unsupported group lock device: ${device.productModel}",
+                finalKnownState = effectiveState(device),
+            )
+        }
+
+        runtime.ensureScan()?.let { error ->
+            return DeviceOperationResult(
+                deviceId = deviceId,
+                success = false,
+                error = error,
+                finalKnownState = effectiveState(device),
+            )
+        }
+
+        runtime.waitForBleLogin(device)?.let { error ->
+            return DeviceOperationResult(
+                deviceId = deviceId,
+                success = false,
+                error = error,
+                finalKnownState = effectiveState(device),
+            )
+        }
+
+        val targetState = if (action == GroupLockAction.LOCK) LockState.LOCKED else LockState.UNLOCKED
+        val historyTag = runtime.historyTag()
+        val outcome = withTimeoutOrNull(COMMAND_TIMEOUT_MS) {
+            awaitCommand { callback ->
+                if (device !is CHSesame5StrictLock) {
+                    callback(Result.failure(UnsupportedOperationException("Strict BLE lock is not supported")))
+                    return@awaitCommand
+                }
+
+                if (action == GroupLockAction.LOCK) {
+                    device.strictLock(historytag = historyTag, result = callback)
+                } else {
+                    device.strictUnlock(historytag = historyTag, result = callback)
+                }
+            }
+        } ?: CommandOutcome.Failure(TimeoutException("BLE command timed out"))
+
+        return when (outcome) {
+            CommandOutcome.Success -> {
+                val observedState = awaitObservedState(device, targetState)
+                if (observedState == targetState) {
+                    DeviceOperationResult(
+                        deviceId = deviceId,
+                        success = true,
+                        finalKnownState = observedState,
+                    )
+                } else {
+                    DeviceOperationResult(
+                        deviceId = deviceId,
+                        success = false,
+                        error = TARGET_NOT_CONFIRMED_ERROR,
+                        finalKnownState = observedState,
+                    )
+                }
+            }
+
+            is CommandOutcome.Failure -> DeviceOperationResult(
+                deviceId = deviceId,
+                success = false,
+                error = outcome.error.message ?: outcome.error::class.java.simpleName,
+                finalKnownState = effectiveState(device),
+            )
+        }
+    }
+
+    override suspend fun getState(deviceId: String): LockState {
+        val device = runtime.resolveDevice(deviceId).getOrNull() ?: return LockState.UNKNOWN
+        if (!isSupportedGroupLockDevice(device)) return LockState.UNKNOWN
+        return effectiveState(device)
+    }
+
+    override suspend fun finishOperation() {
+        runtime.finishOperation()
+    }
+
     private suspend fun awaitObservedState(device: CHDevices, target: LockState): LockState {
-        withTimeoutOrNull(STATE_OBSERVE_TIMEOUT_MS) {
+        withTimeoutOrNull(stateObserveTimeoutMs) {
             while (bleState(device) != target) {
-                delay(STATE_POLL_MS)
+                delay(statePollMs)
             }
         }
         return bleState(device)
@@ -186,44 +241,6 @@ class SesameGroupLockGateway : GroupLockGateway {
         }
     }
 
-    private fun isSupportedDoorLock(device: CHDevices): Boolean = when (device.productModel) {
-        CHProductModel.SS2,
-        CHProductModel.SS4,
-        CHProductModel.SS5,
-        CHProductModel.SS5PRO,
-        CHProductModel.SS5US,
-        CHProductModel.SS6,
-        CHProductModel.SS6Pro,
-        CHProductModel.SS6ProSlidingDoor,
-        CHProductModel.SSM_MIWA -> device is CHSesame2 || device is CHSesame5
-
-        else -> false
-    }
-
-    private suspend fun resolveDevice(deviceId: String): Result<CHDevices> =
-        suspendCancellableCoroutine { continuation ->
-            CHDeviceManager.getCandyDeviceByUUID(deviceId) { result ->
-                result.onSuccess { state ->
-                    if (continuation.isActive) continuation.resume(Result.success(state.data))
-                }
-                result.onFailure { error ->
-                    if (continuation.isActive) continuation.resume(Result.failure(error))
-                }
-            }
-        }
-
-    private suspend fun awaitSimpleBleResult(block: (CHResult<CHEmpty>) -> Unit): Throwable? =
-        suspendCancellableCoroutine { continuation ->
-            try {
-                block(callback@{ result ->
-                    if (!continuation.isActive) return@callback
-                    continuation.resume(result.exceptionOrNull())
-                })
-            } catch (error: Throwable) {
-                if (continuation.isActive) continuation.resume(error)
-            }
-        }
-
     private suspend fun awaitCommand(block: (CHResult<CHEmpty>) -> Unit): CommandOutcome =
         suspendCancellableCoroutine { continuation ->
             try {
@@ -234,6 +251,8 @@ class SesameGroupLockGateway : GroupLockGateway {
                         onFailure = { continuation.resume(CommandOutcome.Failure(it)) },
                     )
                 })
+            } catch (cancellation: CancellationException) {
+                continuation.cancel(cancellation)
             } catch (error: Throwable) {
                 if (continuation.isActive) continuation.resume(CommandOutcome.Failure(error))
             }
@@ -245,8 +264,7 @@ class SesameGroupLockGateway : GroupLockGateway {
     }
 
     companion object {
-        private const val LOGIN_TIMEOUT_MS = 8_000L
-        private const val LOGIN_POLL_MS = 100L
+        internal const val TARGET_NOT_CONFIRMED_ERROR = "command accepted but target state was not confirmed"
         private const val COMMAND_TIMEOUT_MS = 8_000L
         private const val STATE_OBSERVE_TIMEOUT_MS = 1_500L
         private const val STATE_POLL_MS = 50L

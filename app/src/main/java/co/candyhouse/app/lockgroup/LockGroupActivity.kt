@@ -13,10 +13,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import co.candyhouse.app.tabs.devices.ssm2.getNickname
 import co.candyhouse.sesame.open.CHDeviceManager
-import co.candyhouse.sesame.open.devices.CHSesame2
-import co.candyhouse.sesame.open.devices.CHSesame5
 import co.candyhouse.sesame.open.devices.base.CHDevices
-import co.candyhouse.sesame.open.devices.base.CHProductModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -33,6 +32,7 @@ class LockGroupActivity : AppCompatActivity() {
     private lateinit var unlockButton: Button
     private lateinit var configureButton: Button
     private var operationRunning = false
+    private var stateRefreshJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,6 +45,11 @@ class LockGroupActivity : AppCompatActivity() {
         super.onResume()
         renderGroup()
         refreshGroupState()
+    }
+
+    override fun onDestroy() {
+        stateRefreshJob?.cancel()
+        super.onDestroy()
     }
 
     private fun buildContentView(): ScrollView {
@@ -117,7 +122,8 @@ class LockGroupActivity : AppCompatActivity() {
 
     private fun refreshGroupState() {
         val group = currentGroup()
-        lifecycleScope.launch {
+        stateRefreshJob?.cancel()
+        stateRefreshJob = lifecycleScope.launch {
             val state = controller.getGroupState(group)
             stateView.text = "状態: ${stateLabel(state)}"
         }
@@ -136,15 +142,24 @@ class LockGroupActivity : AppCompatActivity() {
         updateButtons()
 
         lifecycleScope.launch {
-            val result = if (action == GroupLockAction.LOCK) {
-                controller.lockGroup(group)
-            } else {
-                controller.unlockGroup(group)
+            try {
+                val result = if (action == GroupLockAction.LOCK) {
+                    controller.lockGroup(group)
+                } else {
+                    controller.unlockGroup(group)
+                }
+                resultView.text = formatResult(result)
+                refreshGroupState()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                resultView.text = "失敗: ${error.message ?: error::class.java.simpleName}"
+            } finally {
+                operationRunning = false
+                if (!isFinishing && !isDestroyed) {
+                    updateButtons()
+                }
             }
-            resultView.text = formatResult(result)
-            operationRunning = false
-            updateButtons()
-            refreshGroupState()
         }
     }
 
@@ -189,7 +204,7 @@ class LockGroupActivity : AppCompatActivity() {
             CHDeviceManager.getCandyDevices { result ->
                 result.onSuccess { state ->
                     if (continuation.isActive) {
-                        continuation.resume(state.data.filter(::isSupportedDoorLock))
+                        continuation.resume(state.data.filter(::isSupportedGroupLockDevice))
                     }
                 }
                 result.onFailure {
@@ -197,20 +212,6 @@ class LockGroupActivity : AppCompatActivity() {
                 }
             }
         }
-
-    private fun isSupportedDoorLock(device: CHDevices): Boolean = when (device.productModel) {
-        CHProductModel.SS2,
-        CHProductModel.SS4,
-        CHProductModel.SS5,
-        CHProductModel.SS5PRO,
-        CHProductModel.SS5US,
-        CHProductModel.SS6,
-        CHProductModel.SS6Pro,
-        CHProductModel.SS6ProSlidingDoor,
-        CHProductModel.SSM_MIWA -> device is CHSesame2 || device is CHSesame5
-
-        else -> false
-    }
 
     private fun updateButtons() {
         val enabled = !operationRunning && currentGroup().deviceIds.isNotEmpty()
@@ -242,6 +243,9 @@ class LockGroupActivity : AppCompatActivity() {
                 } else {
                     append("失敗")
                     deviceResult.error?.let { append(" - ").append(it) }
+                    append(" (")
+                    append(lockStateLabel(deviceResult.finalKnownState))
+                    append(")")
                 }
             }
         }
