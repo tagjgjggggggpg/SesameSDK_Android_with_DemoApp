@@ -1,6 +1,8 @@
 package co.candyhouse.sesame.ble.os3
 
+import co.candyhouse.sesame.ble.DeviceSegmentType
 import co.candyhouse.sesame.ble.SesameItemCode
+import co.candyhouse.sesame.db.model.CHDevice
 import co.candyhouse.sesame.open.devices.CHSesame5
 import co.candyhouse.sesame.open.devices.CHSesame5StrictLock
 import co.candyhouse.sesame.utils.CHEmpty
@@ -36,6 +38,34 @@ class CHSesame5DeviceStrictLockTest {
         assertTrue(success)
         assertEquals(listOf(SesameItemCode.unlock), sent)
         assertFalse(sent.contains(SesameItemCode.toggle))
+    }
+
+    @Test
+    fun strictLock_reachesProductionSendStrictBleCommandAndFinalBleTransportAsLock() {
+        val sentItemCodes = mutableListOf<UByte>()
+        val sentSegments = mutableListOf<DeviceSegmentType>()
+        val device = deviceWithTransport(sentItemCodes, sentSegments)
+
+        device.strictLock(result = { })
+
+        assertEquals(listOf(SesameItemCode.lock.value), sentItemCodes)
+        assertEquals(listOf(DeviceSegmentType.cipher), sentSegments)
+        assertEquals(0, sentItemCodes.count { it == SesameItemCode.toggle.value })
+        assertEquals(0, sentItemCodes.count { it == SesameItemCode.unlock.value })
+    }
+
+    @Test
+    fun strictUnlock_reachesProductionSendStrictBleCommandAndFinalBleTransportAsUnlock() {
+        val sentItemCodes = mutableListOf<UByte>()
+        val sentSegments = mutableListOf<DeviceSegmentType>()
+        val device = deviceWithTransport(sentItemCodes, sentSegments)
+
+        device.strictUnlock(result = { })
+
+        assertEquals(listOf(SesameItemCode.unlock.value), sentItemCodes)
+        assertEquals(listOf(DeviceSegmentType.cipher), sentSegments)
+        assertEquals(0, sentItemCodes.count { it == SesameItemCode.toggle.value })
+        assertEquals(0, sentItemCodes.count { it == SesameItemCode.lock.value })
     }
 
     @Test
@@ -100,4 +130,23 @@ class CHSesame5DeviceStrictLockTest {
             result(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
         },
     )
+
+    private fun deviceWithTransport(
+        sentItemCodes: MutableList<UByte>,
+        sentSegments: MutableList<DeviceSegmentType>,
+    ): CHSesame5Device = CHSesame5Device(
+        strictBleAvailability = { true },
+        strictBleTransportSink = { payload, segment, _ ->
+            sentItemCodes += payload.itemCode
+            sentSegments += segment
+        },
+    ).apply {
+        sesame2KeyData = CHDevice(
+            deviceUUID = "00000000-0000-0000-0000-000000000001",
+            deviceModel = "sesame_5",
+            keyIndex = "0000",
+            secretKey = "00112233445566778899aabbccddeeff",
+            sesame2PublicKey = "00",
+        )
+    }
 }
