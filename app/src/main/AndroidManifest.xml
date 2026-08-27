@@ -75,6 +75,11 @@
             <nav-graph android:value="@navigation/devices_ng" />
         </activity>
 
+        <activity
+            android:name=".lockgroup.LockGroupActivity"
+            android:excludeFromRecents="true"
+            android:exported="false" />
+
         <!--注册服务-->
         <service
             android:name=".tabs.devices.ssm2.setting.DfuService"
@@ -97,6 +102,16 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".lockgroup.EntranceQuickSettingsTileService"
+            android:exported="true"
+            android:icon="@drawable/icon_lock"
+            android:label="玄関"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
 
