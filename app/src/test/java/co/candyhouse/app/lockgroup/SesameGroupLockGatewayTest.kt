@@ -2,6 +2,8 @@ package co.candyhouse.app.lockgroup
 
 import android.bluetooth.BluetoothDevice
 import co.candyhouse.sesame.open.devices.CHSesame5
+import co.candyhouse.sesame.open.devices.CHSesame5LiveBleSnapshot
+import co.candyhouse.sesame.open.devices.CHSesame5LiveLockState
 import co.candyhouse.sesame.open.devices.CHSesame5MechSettings
 import co.candyhouse.sesame.open.devices.CHSesame5OpsSettings
 import co.candyhouse.sesame.open.devices.CHSesame5StrictLock
@@ -27,6 +29,8 @@ class SesameGroupLockGatewayTest {
     @Test fun unlock_usesStrictCapabilityAndNeverLegacyOrToggle() = runBlocking { val d=FakeStrictSesame5Device(CHDeviceStatus.Locked); val r=gateway(mapOf("device-a" to d)).operate("device-a",GroupLockAction.UNLOCK); assertTrue(r.success); assertEquals(1,d.strictUnlockCalls); assertNoUnsafeFallback(d) }
     @Test fun mixedState_lock_dispatchesExplicitStrictLockToBothDevices() = runBlocking { val a=FakeStrictSesame5Device(CHDeviceStatus.Locked); val b=FakeStrictSesame5Device(CHDeviceStatus.Unlocked); val c=GroupLockController(gateway(mapOf("a" to a,"b" to b)),delayBetweenDevices={}); val r=c.lockGroup(LockGroup("e","玄関",listOf("a","b"))); assertEquals(GroupOperationStatus.SUCCESS,r.status); assertEquals(1,a.strictLockCalls); assertEquals(1,b.strictLockCalls); assertNoUnsafeFallback(a); assertNoUnsafeFallback(b) }
     @Test fun mixedState_unlock_dispatchesExplicitStrictUnlockToBothDevices() = runBlocking { val a=FakeStrictSesame5Device(CHDeviceStatus.Locked); val b=FakeStrictSesame5Device(CHDeviceStatus.Unlocked); val c=GroupLockController(gateway(mapOf("a" to a,"b" to b)),delayBetweenDevices={}); val r=c.unlockGroup(LockGroup("e","玄関",listOf("a","b"))); assertEquals(GroupOperationStatus.SUCCESS,r.status); assertEquals(1,a.strictUnlockCalls); assertEquals(1,b.strictUnlockCalls); assertNoUnsafeFallback(a); assertNoUnsafeFallback(b) }
+    @Test fun shadowOnly_isNeverLiveOrFresh()=runBlocking{val d=FakeStrictSesame5Device(CHDeviceStatus.NoBleSignal).apply{liveValid=false;deviceShadowStatus=CHDeviceStatus.Locked};val s=gateway(mapOf("a" to d)).getDeviceSnapshot("a");assertEquals(LockState.UNKNOWN,s.state);assertFalse(s.fresh)}
+    @Test fun disconnectedLiveSnapshot_isUnknown()=runBlocking{val d=FakeStrictSesame5Device(CHDeviceStatus.Locked).apply{liveValid=false};val s=gateway(mapOf("a" to d)).getDeviceSnapshot("a");assertEquals(LockState.UNKNOWN,s.state);assertFalse(s.fresh)}
 
     @Test fun transportReady_skipsScanAndLoginAndStillUsesStrictCommand() = runBlocking {
         val d=FakeStrictSesame5Device(CHDeviceStatus.Unlocked); val rt=FakeRuntime(mapOf("a" to d),transportReady=true,scanError="must not scan",loginError="must not login")
@@ -73,10 +77,12 @@ class SesameGroupLockGatewayTest {
         override fun magnet(result:CHResult<CHEmpty>){};override fun configureLockPosition(lockTarget:Short,unlockTarget:Short,result:CHResult<CHEmpty>){};override fun autolock(delay:Int,result:CHResult<Int>){};override fun opSensorControl(isEnable:Int,result:CHResult<Int>){}
     }
     private class FakeStrictSesame5Device(initialStatus:CHDeviceStatus):FakeLegacySesame5(initialStatus),CHSesame5StrictLock{
-        var strictLockCalls=0;var strictUnlockCalls=0;var confirmTargetState=true;var strictFailure:Throwable?=null;var dropBleBeforeStrictResult=false
-        override fun isStrictBleTransportReady()=true
+        var strictLockCalls=0;var strictUnlockCalls=0;var confirmTargetState=true;var strictFailure:Throwable?=null;var dropBleBeforeStrictResult=false;var liveValid=true
+        private var liveLockState=if(initialStatus==CHDeviceStatus.Locked)CHSesame5LiveLockState.LOCKED else CHSesame5LiveLockState.UNLOCKED
+        override fun isStrictBleTransportReady()=liveValid
+        override fun liveBleSnapshot()=if(liveValid)CHSesame5LiveBleSnapshot(liveLockState,1L)else null
         override fun strictLock(historytag:ByteArray?,result:CHResult<CHEmpty>){strictLockCalls++;completeStrict(GroupLockAction.LOCK,result)}
         override fun strictUnlock(historytag:ByteArray?,result:CHResult<CHEmpty>){strictUnlockCalls++;completeStrict(GroupLockAction.UNLOCK,result)}
-        private fun completeStrict(action:GroupLockAction,result:CHResult<CHEmpty>){if(dropBleBeforeStrictResult)deviceStatus=CHDeviceStatus.NoBleSignal;strictFailure?.let{result(Result.failure(it));return};if(confirmTargetState)deviceStatus=if(action==GroupLockAction.LOCK)CHDeviceStatus.Locked else CHDeviceStatus.Unlocked;result(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))}
+        private fun completeStrict(action:GroupLockAction,result:CHResult<CHEmpty>){if(dropBleBeforeStrictResult){deviceStatus=CHDeviceStatus.NoBleSignal;liveValid=false};strictFailure?.let{result(Result.failure(it));return};if(confirmTargetState){deviceStatus=if(action==GroupLockAction.LOCK)CHDeviceStatus.Locked else CHDeviceStatus.Unlocked;liveLockState=if(action==GroupLockAction.LOCK)CHSesame5LiveLockState.LOCKED else CHSesame5LiveLockState.UNLOCKED};result(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))}
     }
 }
