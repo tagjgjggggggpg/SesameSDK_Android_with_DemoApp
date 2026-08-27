@@ -56,18 +56,29 @@ class EntranceGroupOperationService : Service() {
             return START_NOT_STICKY
         }
 
-        startForeground(NOTIFICATION_ID, notification(progressText(action)))
+        startForeground(FOREGROUND_NOTIFICATION_ID, notification(progressText(action)))
         scope.launch {
             val group = SharedPreferencesLockGroupStore().getGroup(SharedPreferencesLockGroupStore.DEFAULT_GROUP_ID)
                 ?: SharedPreferencesLockGroupStore.DEFAULT_GROUP
             val controller = GroupLockController(SesameGroupLockGateway())
-            val result = executeEntranceGroupAction(controller, group, action)
+            val result = try {
+                executeEntranceGroupAction(controller, group, action)
+            } catch (error: Throwable) {
+                GroupOperationResult(
+                    groupId = group.id,
+                    action = action,
+                    status = GroupOperationStatus.FAILURE,
+                    deviceResults = emptyList(),
+                    error = error.message ?: error::class.java.simpleName,
+                )
+            }
             val state = runCatching { controller.getGroupState(group) }.getOrDefault(GroupState.UNKNOWN)
-            EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService, state, resultText(result))
-            refreshTiles()
             val message = resultText(result)
+            EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService, state, message)
+            refreshTiles()
             Toast.makeText(this@EntranceGroupOperationService, message, Toast.LENGTH_LONG).show()
-            notifyResult(message)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            if (result.status != GroupOperationStatus.SUCCESS) notifyFailure(message)
             stopSelf(startId)
         }
         return START_NOT_STICKY
@@ -100,11 +111,10 @@ class EntranceGroupOperationService : Service() {
         .setOngoing(true)
         .build()
 
-    private fun notifyResult(text: String) {
-        val manager = getSystemService(NotificationManager::class.java)
+    private fun notifyFailure(text: String) {
         runCatching {
-            manager.notify(
-                NOTIFICATION_ID,
+            getSystemService(NotificationManager::class.java).notify(
+                RESULT_NOTIFICATION_ID,
                 NotificationCompat.Builder(this, CHANNEL_ID)
                     .setSmallIcon(R.drawable.small_icon)
                     .setContentTitle("SESAME 玄関")
@@ -132,7 +142,8 @@ class EntranceGroupOperationService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "entrance_group_operation"
-        private const val NOTIFICATION_ID = 41020
+        private const val FOREGROUND_NOTIFICATION_ID = 41020
+        private const val RESULT_NOTIFICATION_ID = 41021
 
         fun start(context: Context, action: String) {
             ContextCompat.startForegroundService(
