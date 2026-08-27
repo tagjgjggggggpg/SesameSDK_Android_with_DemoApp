@@ -186,6 +186,45 @@ internal class CHSesame5Device : CHSesameOS3LockBase(), CHSesame5 {
         }
     }
 
+    override fun strictUnlock(historytag: ByteArray?, result: CHResult<CHEmpty>) {
+        StrictSesame5CommandExecutor(
+            isBleAvailable = { isBleAvailable(result) },
+            sendCommand = { itemCode -> sendStrictBleCommand(itemCode, historytag, result) }
+        ).unlock()
+    }
+
+    override fun strictLock(historytag: ByteArray?, result: CHResult<CHEmpty>) {
+        StrictSesame5CommandExecutor(
+            isBleAvailable = { isBleAvailable(result) },
+            sendCommand = { itemCode -> sendStrictBleCommand(itemCode, historytag, result) }
+        ).lock()
+    }
+
+    private fun sendStrictBleCommand(
+        itemCode: SesameItemCode,
+        historytag: ByteArray?,
+        result: CHResult<CHEmpty>
+    ) {
+        check(itemCode == SesameItemCode.lock || itemCode == SesameItemCode.unlock) {
+            "Strict lock operations may only send lock or unlock"
+        }
+        val keyData = sesame2KeyData
+        if (keyData == null) {
+            result.invoke(Result.failure(IllegalStateException("SESAME key data is unavailable")))
+            return
+        }
+        sendCommand(
+            SesameOS3Payload(itemCode.value, keyData.historyTagBLE(historytag)),
+            DeviceSegmentType.cipher
+        ) { res ->
+            if (res.cmdResultCode == SesameResultCode.success.value) {
+                result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
+            } else {
+                result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
+            }
+        }
+    }
+
     override fun onHistoryReceived(historyData: ByteArray) {}
 
     override fun onHistoryReceivedInternal(historyData: ByteArray) {
