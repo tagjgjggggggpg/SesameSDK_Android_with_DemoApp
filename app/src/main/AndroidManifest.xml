@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!--申请权限-->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.NFC" />
@@ -15,22 +14,12 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission
-        android:name="com.google.android.gms.permission.AD_ID"
-        tools:node="remove" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />
 
-    <!--声明需要硬件支持（true必须，false非必须）-->
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="false" />
-    <uses-feature
-        android:name="android.hardware.camera.autofocus"
-        android:required="false" />
-    <uses-feature
-        android:name="android.hardware.camera.flash"
-        android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
-    <!--应用注册-->
     <application
         android:name=".CandyHouseApp"
         android:allowBackup="false"
@@ -44,114 +33,48 @@
         tools:ignore="GoogleAppIndexingWarning"
         tools:replace="android:label">
 
-        <!--注册声明主界面-->
-        <activity
-            android:name=".tabs.MainActivity"
-            android:exported="true"
-            android:screenOrientation="portrait"
-            tools:ignore="DiscouragedApi,LockedOrientationActivity">
-            <intent-filter>
-                <action android:name="android.nfc.action.TECH_DISCOVERED" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.nfc.action.TAG_DISCOVERED" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <action android:name="android.intent.action.CREATE_SHORTCUT" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
-            <meta-data
-                android:name="android.nfc.action.TECH_DISCOVERED"
-                android:resource="@xml/nfc_tech_filter" />
-
+        <activity android:name=".tabs.MainActivity" android:exported="true" android:screenOrientation="portrait" tools:ignore="DiscouragedApi,LockedOrientationActivity">
+            <intent-filter><action android:name="android.nfc.action.TECH_DISCOVERED" /></intent-filter>
+            <intent-filter><action android:name="android.nfc.action.TAG_DISCOVERED" /></intent-filter>
+            <intent-filter><action android:name="android.nfc.action.NDEF_DISCOVERED" /><category android:name="android.intent.category.DEFAULT" /><data android:mimeType="text/plain" /></intent-filter>
+            <intent-filter><action android:name="android.intent.action.MAIN" /><action android:name="android.intent.action.CREATE_SHORTCUT" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+            <meta-data android:name="android.nfc.action.TECH_DISCOVERED" android:resource="@xml/nfc_tech_filter" />
             <nav-graph android:value="@navigation/devices_ng" />
         </activity>
+        <activity android:name=".lockgroup.LockGroupActivity" android:excludeFromRecents="true" android:exported="false" />
 
-        <activity
-            android:name=".lockgroup.LockGroupActivity"
-            android:excludeFromRecents="true"
-            android:exported="false" />
-
-        <!--注册服务-->
-        <service
-            android:name=".tabs.devices.ssm2.setting.DfuService"
-            android:exported="true"
-            android:label="nRF Toolbox DFU Proxy">
-            <intent-filter>
-                <action android:name="no.nordicsemi.android.action.DFU_UPLOAD" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
+        <service android:name=".tabs.devices.ssm2.setting.DfuService" android:exported="true" android:label="nRF Toolbox DFU Proxy">
+            <intent-filter><action android:name="no.nordicsemi.android.action.DFU_UPLOAD" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
         </service>
-        <service
-            android:name="co.receiver.widget.AutoUnlockForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
-        <service
-            android:name="co.receiver.widget.MessagingIntentService"
-            android:exported="false" />
-        <service
-            android:name="co.receiver.SesameFirebaseMessagingService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
+        <service android:name="co.receiver.widget.AutoUnlockForegroundService" android:exported="false" android:foregroundServiceType="connectedDevice" />
+        <service android:name="co.receiver.widget.MessagingIntentService" android:exported="false" />
+        <service android:name="co.receiver.SesameFirebaseMessagingService" android:exported="false">
+            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
         </service>
-        <service
-            android:name=".lockgroup.EntranceQuickSettingsTileService"
-            android:exported="true"
-            android:icon="@drawable/icon_lock"
-            android:label="玄関"
-            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter>
-                <action android:name="android.service.quicksettings.action.QS_TILE" />
-            </intent-filter>
+        <service android:name=".lockgroup.EntranceGroupOperationService" android:exported="false" android:foregroundServiceType="connectedDevice" />
+        <service android:name=".lockgroup.EntranceQuickSettingsTileService" android:exported="true" android:icon="@drawable/icon_lock" android:label="玄関 施錠" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+        </service>
+        <service android:name=".lockgroup.EntranceUnlockQuickSettingsTileService" android:exported="true" android:icon="@drawable/icon_lock" android:label="玄関 解錠" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
         </service>
 
-        <!--注册广播-->
-        <receiver
-            android:name="co.receiver.widget.AutoUnlockGeofenceReceiver"
-            android:exported="false" />
-        <receiver
-            android:name="co.receiver.widget.AutoUnlockBootReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
+        <receiver android:name="co.receiver.widget.AutoUnlockGeofenceReceiver" android:exported="false" />
+        <receiver android:name="co.receiver.widget.AutoUnlockBootReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+        </receiver>
+        <receiver android:name=".lockgroup.EntranceGroupWidgetProvider" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/entrance_group_widget_info" />
         </receiver>
 
-        <!--注册内容提供者-->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/provider_paths" />
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/provider_paths" />
         </provider>
 
-        <!--注册元数据-->
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="${GOOGLE_MAPS_API_KEY}" />
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="@string/app_name" />
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_icon"
-            android:resource="@drawable/small_icon" />
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_color"
-            android:resource="@color/unlock_blue" />
+        <meta-data android:name="com.google.android.geo.API_KEY" android:value="${GOOGLE_MAPS_API_KEY}" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="@string/app_name" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/small_icon" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/unlock_blue" />
     </application>
-
 </manifest>
