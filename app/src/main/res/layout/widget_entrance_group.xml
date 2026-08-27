@@ -1,53 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:background="@android:color/white"
-    android:gravity="center_horizontal"
-    android:orientation="vertical"
-    android:padding="10dp">
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="玄関"
-        android:textColor="@android:color/black"
-        android:textSize="16sp"
-        android:textStyle="bold" />
-
-    <FrameLayout
-        android:id="@+id/entrance_widget_action"
-        android:layout_width="88dp"
-        android:layout_height="88dp"
-        android:layout_marginTop="4dp"
-        android:foreground="?android:attr/selectableItemBackgroundBorderless">
-        <ImageView
-            android:id="@+id/entrance_widget_icon"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:contentDescription="玄関を操作"
-            android:padding="8dp"
-            android:scaleType="fitCenter"
-            android:src="@drawable/icon_lock" />
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@android:color/white" android:gravity="center_horizontal" android:orientation="vertical" android:padding="8dp">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="玄関" android:textColor="@android:color/black" android:textSize="16sp" android:textStyle="bold" />
+    <FrameLayout android:id="@+id/entrance_widget_action" android:layout_width="80dp" android:layout_height="80dp" android:layout_marginTop="2dp" android:foreground="?android:attr/selectableItemBackgroundBorderless">
+        <ImageView android:id="@+id/entrance_widget_icon" android:layout_width="match_parent" android:layout_height="match_parent" android:contentDescription="玄関を操作" android:padding="6dp" android:scaleType="fitCenter" android:src="@drawable/icon_lock" />
     </FrameLayout>
-
-    <TextView
-        android:id="@+id/entrance_widget_state"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:maxLines="2"
-        android:text="1:不明 2:不明"
-        android:textColor="@android:color/black"
-        android:textSize="13sp" />
-
-    <TextView
-        android:id="@+id/entrance_widget_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:maxLines="1"
-        android:text=""
-        android:textColor="@android:color/darker_gray"
-        android:textSize="10sp" />
+    <TextView android:id="@+id/entrance_widget_state" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:maxLines="2" android:text="1:不明 2:不明" android:textColor="@android:color/black" android:textSize="13sp" />
+    <TextView android:id="@+id/entrance_widget_confirmed" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="確認できません" android:textColor="@android:color/darker_gray" android:textSize="10sp" />
+    <TextView android:id="@+id/entrance_widget_battery" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxLines="1" android:text="" android:textColor="#C62828" android:textSize="10sp" android:visibility="gone" />
+    <TextView android:id="@+id/entrance_widget_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:maxLines="1" android:text="" android:textColor="@android:color/darker_gray" android:textSize="9sp" />
 </LinearLayout>
