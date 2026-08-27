@@ -21,8 +21,10 @@ import co.candyhouse.sesame.open.devices.base.CHDevices
 import co.candyhouse.sesame.utils.P2DiagnosticLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 class LockGroupActivity : AppCompatActivity() {
@@ -37,10 +39,12 @@ class LockGroupActivity : AppCompatActivity() {
     private lateinit var configureButton: Button
     private var operationRunning = false
     private var stateRefreshJob: Job? = null
+    private var stateFollowJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); title = "玄関"; setContentView(buildContentView()); renderGroup() }
-    override fun onResume() { super.onResume(); renderGroup(); refreshGroupState() }
-    override fun onDestroy() { stateRefreshJob?.cancel(); super.onDestroy() }
+    override fun onResume() { super.onResume(); renderGroup(); startStateFollowing() }
+    override fun onPause() { stateFollowJob?.cancel(); stateFollowJob = null; stateRefreshJob?.cancel(); stateRefreshJob = null; super.onPause() }
+    override fun onDestroy() { stateFollowJob?.cancel(); stateRefreshJob?.cancel(); super.onDestroy() }
 
     private fun buildContentView(): ScrollView {
         val padding = dp(20)
@@ -72,7 +76,23 @@ class LockGroupActivity : AppCompatActivity() {
 
     private fun currentGroup(): LockGroup = groupStore.getGroup(SharedPreferencesLockGroupStore.DEFAULT_GROUP_ID) ?: SharedPreferencesLockGroupStore.DEFAULT_GROUP
     private fun renderGroup() { val group = currentGroup(); groupNameView.text = group.name; membersView.text = if (group.deviceIds.isEmpty()) "対象ロック: 未設定" else "対象ロック: ${group.deviceIds.size}台\n" + group.deviceIds.joinToString("\n"); updateButtons() }
-    private fun refreshGroupState() { val group = currentGroup(); stateRefreshJob?.cancel(); stateRefreshJob = lifecycleScope.launch { val state = controller.getGroupState(group); stateView.text = "状態: ${stateLabel(state)}" } }
+    private fun startStateFollowing() {
+        stateFollowJob?.cancel()
+        stateFollowJob = lifecycleScope.launch {
+            while (true) {
+                refreshGroupState()
+                delay(STATE_FOLLOW_INTERVAL_MS)
+            }
+        }
+    }
+    private fun refreshGroupState() {
+        val group = currentGroup()
+        stateRefreshJob?.cancel()
+        stateRefreshJob = lifecycleScope.launch {
+            val state = controller.getGroupState(group)
+            stateView.text = "状態: ${stateLabel(state)}"
+        }
+    }
     private fun runGroupAction(action: GroupLockAction) {
         if (operationRunning) return
         val group = currentGroup(); if (group.deviceIds.isEmpty()) { Toast.makeText(this, "先に対象ロックを選択してください", Toast.LENGTH_SHORT).show(); return }
@@ -80,10 +100,26 @@ class LockGroupActivity : AppCompatActivity() {
         lifecycleScope.launch { try { val result = if (action == GroupLockAction.LOCK) controller.lockGroup(group) else controller.unlockGroup(group); resultView.text = formatResult(result); refreshGroupState() } catch (cancellation: CancellationException) { throw cancellation } catch (error: Throwable) { resultView.text = "失敗: ${error.message ?: error::class.java.simpleName}" } finally { operationRunning = false; if (!isFinishing && !isDestroyed) updateButtons() } }
     }
     private fun showDeviceSelection() { lifecycleScope.launch { val devices = loadSupportedLocks(); if (devices.isEmpty()) { Toast.makeText(this@LockGroupActivity, "登録済みの対応ロックがありません", Toast.LENGTH_SHORT).show(); return@launch }; val group = currentGroup(); val selected = group.deviceIds.toSet(); val checked = BooleanArray(devices.size) { devices[it].deviceId?.toString() in selected }; val labels = devices.map { "${it.getNickname()}\n${it.deviceId}" }.toTypedArray(); AlertDialog.Builder(this@LockGroupActivity).setTitle("${group.name}のロック").setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }.setNegativeButton("キャンセル", null).setPositiveButton("保存") { _, _ -> val deviceIds = devices.mapIndexedNotNull { index, device -> if (checked[index]) device.deviceId?.toString() else null }; groupStore.saveGroup(group.copy(deviceIds = deviceIds)); resultView.text = "設定を保存しました"; renderGroup(); refreshGroupState() }.show() } }
-    private suspend fun loadSupportedLocks(): List<CHDevices> = suspendCancellableCoroutine { continuation -> CHDeviceManager.getCandyDevices { result -> result.onSuccess { state -> if (continuation.isActive) continuation.resume(state.data.filter(::isSupportedGroupLockDevice)) }; result.onFailure { if (continuation.isActive) continuation.resume(emptyList()) } } }
+    private suspend fun loadSupportedLocks(): List<CHDevices> = withTimeoutOrNull(DEVICE_LIST_TIMEOUT_MS) {
+        suspendCancellableCoroutine<List<CHDevices>> { continuation ->
+            try {
+                CHDeviceManager.getCandyDevices { result ->
+                    result.onSuccess { state -> if (continuation.isActive) continuation.resume(state.data.filter(::isSupportedGroupLockDevice)) }
+                    result.onFailure { if (continuation.isActive) continuation.resume(emptyList()) }
+                }
+            } catch (_: Throwable) {
+                if (continuation.isActive) continuation.resume(emptyList())
+            }
+        }
+    } ?: emptyList()
     private fun updateButtons() { val enabled = !operationRunning && currentGroup().deviceIds.isNotEmpty(); lockButton.isEnabled = enabled; unlockButton.isEnabled = enabled; configureButton.isEnabled = !operationRunning }
     private fun formatResult(result: GroupOperationResult): String { val header = when (result.status) { GroupOperationStatus.SUCCESS -> "完了"; GroupOperationStatus.PARTIAL -> "一部失敗"; GroupOperationStatus.FAILURE -> "失敗"; GroupOperationStatus.BUSY -> "別の操作を実行中" }; if (result.deviceResults.isEmpty()) return listOfNotNull(header, result.error).joinToString(": "); return buildString { append(header); result.deviceResults.forEach { d -> append("\n${d.deviceId}: "); if (d.success) append("成功 (${lockStateLabel(d.finalKnownState)})") else { append("失敗"); d.error?.let { append(" - $it") }; append(" (${lockStateLabel(d.finalKnownState)})") } } } }
     private fun stateLabel(state: GroupState): String = when (state) { GroupState.LOCKED -> "施錠"; GroupState.UNLOCKED -> "解錠"; GroupState.MIXED -> "混在"; GroupState.UNKNOWN -> "不明" }
     private fun lockStateLabel(state: LockState): String = when (state) { LockState.LOCKED -> "施錠"; LockState.UNLOCKED -> "解錠"; LockState.UNKNOWN -> "状態不明" }
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    companion object {
+        private const val STATE_FOLLOW_INTERVAL_MS = 750L
+        private const val DEVICE_LIST_TIMEOUT_MS = 10_000L
+    }
 }
