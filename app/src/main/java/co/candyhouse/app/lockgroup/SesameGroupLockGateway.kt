@@ -17,6 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import java.security.MessageDigest
 import java.util.concurrent.TimeoutException
 import kotlin.coroutines.resume
 
@@ -29,7 +30,14 @@ private fun p2GroupLog(message: String) {
         // Local JVM unit tests do not provide android.util.Log. Diagnostics must not alter behavior.
     }
 }
-private fun shortDeviceId(deviceId: String): String = deviceId.takeLast(6)
+private fun shortDeviceId(deviceId: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(deviceId.toByteArray(Charsets.UTF_8))
+    return digest.take(4).joinToString("") { "%02x".format(it) }
+}
+private fun tracePrefix(deviceId: String? = null): String = buildString {
+    append("op=").append(GroupOperationTrace.current())
+    if (deviceId != null) append(" dev=").append(shortDeviceId(deviceId))
+}
 
 internal interface SesameGroupLockRuntime {
     suspend fun resolveDevice(deviceId: String): Result<CHDevices>
@@ -46,47 +54,59 @@ internal class ProductionSesameGroupLockRuntime : SesameGroupLockRuntime {
 
     override suspend fun resolveDevice(deviceId: String): Result<CHDevices> {
         val started = System.currentTimeMillis()
-        p2GroupLog("dev=${shortDeviceId(deviceId)} resolveDevice start")
-        return suspendCancellableCoroutine { continuation ->
-            try {
-                CHDeviceManager.getCandyDeviceByUUID(deviceId) { result ->
-                    p2GroupLog("dev=${shortDeviceId(deviceId)} resolveDevice callback success=${result.isSuccess} elapsed=${System.currentTimeMillis() - started}ms")
-                    result.onSuccess { state ->
-                        if (continuation.isActive) continuation.resume(Result.success(state.data))
+        val prefix = tracePrefix(deviceId)
+        p2GroupLog("$prefix resolveDevice start")
+        val result = withTimeoutOrNull(RESOLVE_DEVICE_TIMEOUT_MS) {
+            suspendCancellableCoroutine<Result<CHDevices>> { continuation ->
+                try {
+                    CHDeviceManager.getCandyDeviceByUUID(deviceId) { callbackResult ->
+                        p2GroupLog("$prefix resolveDevice callback success=${callbackResult.isSuccess} elapsed=${System.currentTimeMillis() - started}ms")
+                        callbackResult.onSuccess { state ->
+                            if (continuation.isActive) continuation.resume(Result.success(state.data))
+                        }
+                        callbackResult.onFailure { error ->
+                            if (continuation.isActive) continuation.resume(Result.failure(error))
+                        }
                     }
-                    result.onFailure { error ->
-                        if (continuation.isActive) continuation.resume(Result.failure(error))
-                    }
+                } catch (error: Throwable) {
+                    p2GroupLog("$prefix resolveDevice exception=${error::class.java.simpleName} elapsed=${System.currentTimeMillis() - started}ms")
+                    if (continuation.isActive) continuation.resume(Result.failure(error))
                 }
-            } catch (error: Throwable) {
-                p2GroupLog("dev=${shortDeviceId(deviceId)} resolveDevice exception=${error::class.java.simpleName} elapsed=${System.currentTimeMillis() - started}ms")
-                if (continuation.isActive) continuation.resume(Result.failure(error))
             }
         }
+        if (result == null) {
+            p2GroupLog("$prefix resolveDevice timeout elapsed=${System.currentTimeMillis() - started}ms")
+            return Result.failure(TimeoutException("Device resolution timed out"))
+        }
+        return result
     }
 
     override suspend fun ensureScan(): String? {
         val started = System.currentTimeMillis()
-        p2GroupLog("ensureScan start initialized=$scanInitialized scanning=${CHBleManager.mScanning}")
+        val prefix = tracePrefix()
+        p2GroupLog("$prefix ensureScan start initialized=$scanInitialized scanning=${CHBleManager.mScanning}")
         if (scanInitialized) {
-            p2GroupLog("ensureScan cached error=$scanError elapsed=${System.currentTimeMillis() - started}ms")
+            p2GroupLog("$prefix ensureScan cached error=$scanError elapsed=${System.currentTimeMillis() - started}ms")
             return scanError
         }
         val wasEnabled = CHBleManager.mScanning == CHScanStatus.Enable
-        val error = awaitSimpleBleResult { callback -> CHBleManager.enableScan(false, callback) }
+        val error = withTimeoutOrNull(SCAN_START_TIMEOUT_MS) {
+            awaitSimpleBleResult { callback -> CHBleManager.enableScan(false, callback) }
+        } ?: TimeoutException("BLE scan start timed out")
         scanInitialized = true
         scanStartedByGateway = error == null && !wasEnabled
         scanError = error?.message ?: error?.javaClass?.simpleName
-        p2GroupLog("ensureScan end error=$scanError startedByGateway=$scanStartedByGateway scanning=${CHBleManager.mScanning} elapsed=${System.currentTimeMillis() - started}ms")
+        p2GroupLog("$prefix ensureScan end error=$scanError startedByGateway=$scanStartedByGateway scanning=${CHBleManager.mScanning} elapsed=${System.currentTimeMillis() - started}ms")
         return scanError
     }
 
     override suspend fun waitForBleLogin(device: CHDevices): String? {
-        val id = shortDeviceId(device.deviceId.toString())
+        val id = device.deviceId.toString()
+        val prefix = tracePrefix(id)
         val started = System.currentTimeMillis()
-        p2GroupLog("dev=$id waitForBleLogin start logical=${device.deviceStatus} loginValue=${device.deviceStatus.value}")
+        p2GroupLog("$prefix waitForBleLogin start logical=${device.deviceStatus} loginValue=${device.deviceStatus.value}")
         if (device.deviceStatus.value == CHDeviceLoginStatus.logined) {
-            p2GroupLog("dev=$id waitForBleLogin immediate-logined elapsed=${System.currentTimeMillis() - started}ms")
+            p2GroupLog("$prefix waitForBleLogin immediate-logined elapsed=${System.currentTimeMillis() - started}ms")
             return null
         }
         val loggedIn = withTimeoutOrNull(LOGIN_TIMEOUT_MS) {
@@ -94,11 +114,11 @@ internal class ProductionSesameGroupLockRuntime : SesameGroupLockRuntime {
             while (device.deviceStatus.value != CHDeviceLoginStatus.logined) {
                 if (device.deviceStatus == CHDeviceStatus.ReceivedAdV && !connectRequested) {
                     connectRequested = true
-                    p2GroupLog("dev=$id waitForBleLogin connect requested logical=${device.deviceStatus}")
+                    p2GroupLog("$prefix waitForBleLogin connect requested logical=${device.deviceStatus}")
                     try {
                         device.connect { }
                     } catch (error: Throwable) {
-                        p2GroupLog("dev=$id waitForBleLogin connect exception=${error::class.java.simpleName}")
+                        p2GroupLog("$prefix waitForBleLogin connect exception=${error::class.java.simpleName}")
                         return@withTimeoutOrNull false
                     }
                 }
@@ -107,21 +127,22 @@ internal class ProductionSesameGroupLockRuntime : SesameGroupLockRuntime {
             }
             true
         } ?: false
-        p2GroupLog("dev=$id waitForBleLogin end loggedIn=$loggedIn logical=${device.deviceStatus} elapsed=${System.currentTimeMillis() - started}ms")
+        p2GroupLog("$prefix waitForBleLogin end loggedIn=$loggedIn logical=${device.deviceStatus} elapsed=${System.currentTimeMillis() - started}ms")
         return if (loggedIn) null else "BLE login timed out or disconnected"
     }
 
     override suspend fun finishOperation() {
         val started = System.currentTimeMillis()
+        val prefix = tracePrefix()
         val shouldDisableScan = scanStartedByGateway && !AutoUnlockForegroundService.isLive
-        p2GroupLog("finishOperation start disableScan=$shouldDisableScan scanning=${CHBleManager.mScanning}")
+        p2GroupLog("$prefix finishOperation start disableScan=$shouldDisableScan scanning=${CHBleManager.mScanning}")
         scanInitialized = false
         scanStartedByGateway = false
         scanError = null
         if (shouldDisableScan) {
             withTimeoutOrNull(SCAN_FINISH_TIMEOUT_MS) { awaitSimpleBleResult { callback -> CHBleManager.disableScan(callback) } }
         }
-        p2GroupLog("finishOperation end scanning=${CHBleManager.mScanning} elapsed=${System.currentTimeMillis() - started}ms")
+        p2GroupLog("$prefix finishOperation end scanning=${CHBleManager.mScanning} elapsed=${System.currentTimeMillis() - started}ms")
     }
 
     override fun historyTag(): ByteArray? = UserUtils.getEnvironmentIdWithByte()
@@ -143,6 +164,8 @@ internal class ProductionSesameGroupLockRuntime : SesameGroupLockRuntime {
     companion object {
         private const val LOGIN_TIMEOUT_MS = 8_000L
         private const val LOGIN_POLL_MS = 100L
+        private const val RESOLVE_DEVICE_TIMEOUT_MS = 10_000L
+        private const val SCAN_START_TIMEOUT_MS = 10_000L
         private const val SCAN_FINISH_TIMEOUT_MS = 2_000L
     }
 }
@@ -154,31 +177,31 @@ internal class SesameGroupLockGateway(
 ) : GroupLockGateway {
     override suspend fun operate(deviceId: String, action: GroupLockAction): DeviceOperationResult {
         val opStarted = System.currentTimeMillis()
-        val id = shortDeviceId(deviceId)
-        p2GroupLog("dev=$id action=$action operation start")
+        val prefix = tracePrefix(deviceId)
+        p2GroupLog("$prefix action=$action operation start")
         val deviceResult = runtime.resolveDevice(deviceId)
         val device = deviceResult.getOrElse { error ->
-            p2GroupLog("dev=$id action=$action operation fail stage=resolve elapsed=${System.currentTimeMillis() - opStarted}ms error=${error::class.java.simpleName}")
+            p2GroupLog("$prefix action=$action operation fail stage=resolve elapsed=${System.currentTimeMillis() - opStarted}ms error=${error::class.java.simpleName}")
             return DeviceOperationResult(deviceId, false, error.message ?: "Device not found")
         }
-        p2GroupLog("dev=$id action=$action resolveDevice end model=${device.productModel} logical=${device.deviceStatus} elapsed=${System.currentTimeMillis() - opStarted}ms")
+        p2GroupLog("$prefix action=$action resolveDevice end model=${device.productModel} logical=${device.deviceStatus} elapsed=${System.currentTimeMillis() - opStarted}ms")
 
         if (!isSupportedGroupLockDevice(device)) {
             return DeviceOperationResult(deviceId, false, "Unsupported group lock device: ${device.productModel}", effectiveState(device))
         }
         runtime.ensureScan()?.let { error ->
-            p2GroupLog("dev=$id action=$action operation fail stage=scan elapsed=${System.currentTimeMillis() - opStarted}ms error=$error")
+            p2GroupLog("$prefix action=$action operation fail stage=scan elapsed=${System.currentTimeMillis() - opStarted}ms error=$error")
             return DeviceOperationResult(deviceId, false, error, effectiveState(device))
         }
         runtime.waitForBleLogin(device)?.let { error ->
-            p2GroupLog("dev=$id action=$action operation fail stage=login logical=${device.deviceStatus} elapsed=${System.currentTimeMillis() - opStarted}ms error=$error")
+            p2GroupLog("$prefix action=$action operation fail stage=login logical=${device.deviceStatus} elapsed=${System.currentTimeMillis() - opStarted}ms error=$error")
             return DeviceOperationResult(deviceId, false, error, effectiveState(device))
         }
 
         val targetState = if (action == GroupLockAction.LOCK) LockState.LOCKED else LockState.UNLOCKED
         val historyTag = runtime.historyTag()
         val commandStarted = System.currentTimeMillis()
-        p2GroupLog("dev=$id action=$action strict call logical=${device.deviceStatus} target=$targetState")
+        p2GroupLog("$prefix action=$action strict call logical=${device.deviceStatus} target=$targetState")
         val outcome = withTimeoutOrNull(COMMAND_TIMEOUT_MS) {
             awaitCommand { callback ->
                 if (device !is CHSesame5StrictLock) {
@@ -189,19 +212,19 @@ internal class SesameGroupLockGateway(
                 else device.strictUnlock(historytag = historyTag, result = callback)
             }
         } ?: CommandOutcome.Failure(TimeoutException("BLE command timed out"))
-        p2GroupLog("dev=$id action=$action strict callback outcome=${outcome::class.java.simpleName} logical=${device.deviceStatus} commandElapsed=${System.currentTimeMillis() - commandStarted}ms totalElapsed=${System.currentTimeMillis() - opStarted}ms")
+        p2GroupLog("$prefix action=$action strict callback outcome=${outcome::class.java.simpleName} logical=${device.deviceStatus} commandElapsed=${System.currentTimeMillis() - commandStarted}ms totalElapsed=${System.currentTimeMillis() - opStarted}ms")
 
         return when (outcome) {
             CommandOutcome.Success -> {
                 val confirmStarted = System.currentTimeMillis()
-                p2GroupLog("dev=$id action=$action target confirmation start target=$targetState logical=${device.deviceStatus}")
+                p2GroupLog("$prefix action=$action target confirmation start target=$targetState logical=${device.deviceStatus}")
                 val observedState = awaitObservedState(device, targetState)
-                p2GroupLog("dev=$id action=$action target confirmation end observed=$observedState logical=${device.deviceStatus} elapsed=${System.currentTimeMillis() - confirmStarted}ms totalElapsed=${System.currentTimeMillis() - opStarted}ms")
+                p2GroupLog("$prefix action=$action target confirmation end observed=$observedState logical=${device.deviceStatus} elapsed=${System.currentTimeMillis() - confirmStarted}ms totalElapsed=${System.currentTimeMillis() - opStarted}ms")
                 if (observedState == targetState) DeviceOperationResult(deviceId, true, finalKnownState = observedState)
                 else DeviceOperationResult(deviceId, false, TARGET_NOT_CONFIRMED_ERROR, observedState)
             }
             is CommandOutcome.Failure -> {
-                p2GroupLog("dev=$id action=$action operation fail stage=command error=${outcome.error.message} logical=${device.deviceStatus} totalElapsed=${System.currentTimeMillis() - opStarted}ms")
+                p2GroupLog("$prefix action=$action operation fail stage=command error=${outcome.error.message} logical=${device.deviceStatus} totalElapsed=${System.currentTimeMillis() - opStarted}ms")
                 DeviceOperationResult(deviceId, false, outcome.error.message ?: outcome.error::class.java.simpleName, effectiveState(device))
             }
         }
