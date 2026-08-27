@@ -22,7 +22,12 @@ import kotlin.coroutines.resume
 
 private const val P2_GROUP_TAG = "P2GroupBLE"
 private fun p2GroupLog(message: String) {
-    if (BuildConfig.DEBUG) Log.d(P2_GROUP_TAG, message)
+    if (!BuildConfig.DEBUG) return
+    try {
+        Log.d(P2_GROUP_TAG, message)
+    } catch (_: RuntimeException) {
+        // Local JVM unit tests do not provide android.util.Log. Diagnostics must not alter behavior.
+    }
 }
 private fun shortDeviceId(deviceId: String): String = deviceId.takeLast(6)
 
