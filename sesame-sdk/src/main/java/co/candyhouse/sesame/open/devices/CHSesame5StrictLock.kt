@@ -11,6 +11,9 @@ import co.candyhouse.sesame.utils.CHResult
  * CHSesame5 superinterface hierarchy remains unchanged.
  */
 interface CHSesame5StrictLock {
+    /** True only when the authenticated BLE transport needed by strict commands is live. */
+    fun isStrictBleTransportReady(): Boolean = false
+
     fun strictLock(historytag: ByteArray? = null, result: CHResult<CHEmpty>) {
         result.invoke(Result.failure(UnsupportedOperationException("Strict BLE lock is not supported")))
     }
