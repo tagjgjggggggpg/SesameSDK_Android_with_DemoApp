@@ -154,4 +154,6 @@ dependencies {
     implementation libs.firebase.analytics.ktx
     implementation libs.firebase.messaging.ktx
     implementation libs.firebase.crashlytics.ktx
+
+    testImplementation 'junit:junit:4.13.2'
 }
