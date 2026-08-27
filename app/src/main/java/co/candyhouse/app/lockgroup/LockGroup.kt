@@ -16,6 +16,8 @@ data class EntranceDeviceSnapshot(
     val state: LockState,
     val batteryPercent: Int? = null,
     val fresh: Boolean = false,
+    val stateObservedAtMillis: Long? = null,
+    val batterySampleObservedAtMillis: Long? = null,
 )
 
 data class EntranceGroupStateSnapshot(
@@ -37,9 +39,12 @@ data class EntranceGroupStateSnapshot(
     }
 }
 
-fun resolveEntranceExplicitActionFromFreshState(snapshot: EntranceGroupStateSnapshot): GroupLockAction =
-    if (snapshot.deviceA.fresh && snapshot.deviceB.fresh && snapshot.deviceA.state == LockState.UNLOCKED && snapshot.deviceB.state == LockState.UNLOCKED) GroupLockAction.LOCK
-    else GroupLockAction.UNLOCK
+fun resolveEntranceExplicitActionFromFreshState(snapshot: EntranceGroupStateSnapshot): GroupLockAction? {
+    val a = snapshot.deviceA
+    val b = snapshot.deviceB
+    if (!a.fresh || !b.fresh || a.state == LockState.UNKNOWN || b.state == LockState.UNKNOWN) return null
+    return if (a.state == LockState.UNLOCKED && b.state == LockState.UNLOCKED) GroupLockAction.LOCK else GroupLockAction.UNLOCK
+}
 
 const val LOW_BATTERY_THRESHOLD_PERCENT = 20
 const val LOW_BATTERY_RESET_PERCENT = 25
