@@ -9,34 +9,31 @@ import android.content.Intent
 import android.os.Build
 import android.widget.RemoteViews
 import co.candyhouse.app.R
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 
 class EntranceGroupWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, appWidgetIds: IntArray) {
         super.onUpdate(context, manager, appWidgetIds)
-        val pending = goAsync()
-        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
-            try {
-                val group = SharedPreferencesLockGroupStore().getGroup(SharedPreferencesLockGroupStore.DEFAULT_GROUP_ID)
-                    ?: SharedPreferencesLockGroupStore.DEFAULT_GROUP
-                val state = runCatching { GroupLockController(SesameGroupLockGateway()).getGroupState(group) }
-                    .getOrDefault(GroupState.UNKNOWN)
-                appWidgetIds.forEach { updateOne(context, manager, it, state, null) }
-            } finally {
-                pending.finish()
-            }
-        }
+        val state = cachedState(context)
+        appWidgetIds.forEach { updateOne(context, manager, it, state, null) }
     }
 
     companion object {
         fun updateAll(context: Context, state: GroupState, status: String?) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_STATE, state.name)
+                .apply()
             val manager = AppWidgetManager.getInstance(context)
             val component = ComponentName(context, EntranceGroupWidgetProvider::class.java)
             manager.getAppWidgetIds(component).forEach { updateOne(context, manager, it, state, status) }
         }
+
+        private fun cachedState(context: Context): GroupState = runCatching {
+            GroupState.valueOf(
+                context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(KEY_STATE, GroupState.UNKNOWN.name) ?: GroupState.UNKNOWN.name
+            )
+        }.getOrDefault(GroupState.UNKNOWN)
 
         private fun updateOne(context: Context, manager: AppWidgetManager, id: Int, state: GroupState, status: String?) {
             val views = RemoteViews(context.packageName, R.layout.widget_entrance_group)
@@ -63,5 +60,8 @@ class EntranceGroupWidgetProvider : AppWidgetProvider() {
                 PendingIntent.getService(context, requestCode, intent, flags)
             }
         }
+
+        private const val PREFS = "entrance_group_widget"
+        private const val KEY_STATE = "last_group_state"
     }
 }
