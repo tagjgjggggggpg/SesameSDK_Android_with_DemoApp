@@ -35,6 +35,7 @@ import co.candyhouse.sesame.utils.toReverseBytes
 internal class CHSesame5Device(
     private val strictBleAvailability: ((CHResult<CHEmpty>) -> Boolean)? = null,
     private val strictCommandSink: ((SesameItemCode, ByteArray?, CHResult<CHEmpty>) -> Unit)? = null,
+    private val strictBleTransportSink: ((SesameOS3Payload, DeviceSegmentType, (SSM3ResponsePayload) -> Unit) -> Unit)? = null,
 ) : CHSesameOS3LockBase(), CHSesame5, CHSesame5StrictLock {
 
     override var mechSetting: CHSesame5MechSettings? = null
@@ -229,16 +230,19 @@ internal class CHSesame5Device(
             result.invoke(Result.failure(IllegalStateException("SESAME key data is unavailable")))
             return
         }
-        sendCommand(
-            SesameOS3Payload(itemCode.value, keyData.historyTagBLE(historytag)),
-            DeviceSegmentType.cipher
-        ) { res ->
+        val command = SesameOS3Payload(itemCode.value, keyData.historyTagBLE(historytag))
+        val responseHandler: (SSM3ResponsePayload) -> Unit = { res ->
             if (res.cmdResultCode == SesameResultCode.success.value) {
                 result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
             } else {
                 result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
             }
         }
+        strictBleTransportSink?.let { transport ->
+            transport(command, DeviceSegmentType.cipher, responseHandler)
+            return
+        }
+        sendCommand(command, DeviceSegmentType.cipher, responseHandler)
     }
 
     override fun onHistoryReceived(historyData: ByteArray) {}
@@ -273,7 +277,7 @@ internal class CHSesame5Device(
             }
 
             SesameItemCode.mechSetting.value -> {
-                mechSetting = CHSesame5MechSettings(receivePayload.payload)
+                mechSetting = CHSesame5MechSettings(receivePayload.payload.sliceArray(0..5))
             }
 
             SesameItemCode.OPS_CONTROL.value -> {
