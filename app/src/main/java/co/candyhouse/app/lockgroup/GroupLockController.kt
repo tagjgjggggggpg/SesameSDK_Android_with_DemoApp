@@ -3,6 +3,7 @@ package co.candyhouse.app.lockgroup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 interface GroupLockGateway {
     suspend fun operate(deviceId: String, action: GroupLockAction): DeviceOperationResult
@@ -17,6 +18,17 @@ private object ProcessWideGroupOperationGate {
 
     fun release() {
         inFlight.set(false)
+    }
+}
+
+internal object GroupOperationTrace {
+    private val sequence = AtomicLong(0)
+    @Volatile private var currentId: String? = null
+
+    fun begin(): String = "op${sequence.incrementAndGet()}".also { currentId = it }
+    fun current(): String = currentId ?: "op-none"
+    fun end(id: String) {
+        if (currentId == id) currentId = null
     }
 }
 
@@ -45,6 +57,7 @@ class GroupLockController(
             )
         }
 
+        val operationId = GroupOperationTrace.begin()
         try {
             if (group.deviceIds.isEmpty()) {
                 return GroupOperationResult(
@@ -92,6 +105,7 @@ class GroupLockController(
             try {
                 gateway.finishOperation()
             } finally {
+                GroupOperationTrace.end(operationId)
                 ProcessWideGroupOperationGate.release()
             }
         }
