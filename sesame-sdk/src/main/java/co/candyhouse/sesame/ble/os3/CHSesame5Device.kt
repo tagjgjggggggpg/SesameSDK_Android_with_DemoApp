@@ -42,7 +42,14 @@ internal class CHSesame5Device(
     override var mechSetting: CHSesame5MechSettings? = null
     override var opsSetting: CHSesame5OpsSettings? = null
     private fun diagId(): String = deviceId?.toString()?.takeLast(6) ?: "unknown"
-    private fun diag(message: String) { if (BuildConfig.DEBUG) L.d("P2StrictBLE", "dev=${diagId()} $message") }
+    private fun diag(message: String) {
+        if (!BuildConfig.DEBUG) return
+        try {
+            L.d("P2StrictBLE", "dev=${diagId()} $message")
+        } catch (_: RuntimeException) {
+            // Local JVM unit tests do not provide android.util.Log. Diagnostics must not alter behavior.
+        }
+    }
 
     override fun goIOT() {
         L.d("hcia", "[ss5]goIOT:$deviceId")
