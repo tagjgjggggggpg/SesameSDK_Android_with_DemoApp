@@ -6,30 +6,22 @@ data class LockGroup(
     val deviceIds: List<String>,
 )
 
-enum class GroupLockAction {
-    LOCK,
-    UNLOCK,
+enum class GroupLockAction { LOCK, UNLOCK }
+enum class LockState { LOCKED, UNLOCKED, UNKNOWN }
+enum class GroupState { LOCKED, UNLOCKED, MIXED, UNKNOWN }
+enum class GroupOperationStatus { SUCCESS, PARTIAL, FAILURE, BUSY }
+
+data class EntranceGroupStateSnapshot(
+    val deviceA: LockState,
+    val deviceB: LockState,
+) {
+    val groupState: GroupState
+        get() = aggregateGroupState(listOf(deviceA, deviceB))
 }
 
-enum class LockState {
-    LOCKED,
-    UNLOCKED,
-    UNKNOWN,
-}
-
-enum class GroupState {
-    LOCKED,
-    UNLOCKED,
-    MIXED,
-    UNKNOWN,
-}
-
-enum class GroupOperationStatus {
-    SUCCESS,
-    PARTIAL,
-    FAILURE,
-    BUSY,
-}
+fun resolveEntranceExplicitActionFromFreshState(snapshot: EntranceGroupStateSnapshot): GroupLockAction =
+    if (snapshot.deviceA == LockState.UNLOCKED && snapshot.deviceB == LockState.UNLOCKED) GroupLockAction.LOCK
+    else GroupLockAction.UNLOCK
 
 data class DeviceOperationResult(
     val deviceId: String,
