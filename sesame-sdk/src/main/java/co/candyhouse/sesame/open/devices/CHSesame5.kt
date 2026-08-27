@@ -13,6 +13,19 @@ interface CHSesame5 : CHSesameLock {
     fun lock(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
     fun unlock(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
     fun toggle(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
+
+    /**
+     * BLE-only explicit lock operation. Unlike [lock], this method never falls
+     * back to IoT or toggle when BLE is unavailable.
+     */
+    fun strictLock(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
+
+    /**
+     * BLE-only explicit unlock operation. Unlike [unlock], this method never
+     * falls back to IoT or toggle when BLE is unavailable.
+     */
+    fun strictUnlock(historytag: ByteArray? = null, result: CHResult<CHEmpty>)
+
     fun magnet(result: CHResult<CHEmpty>)
     fun configureLockPosition(lockTarget: Short, unlockTarget: Short, result: CHResult<CHEmpty>)
     fun autolock(delay: Int, result: CHResult<Int>)
