@@ -152,11 +152,13 @@ internal abstract class CHSesameOS3LockBase : CHSesameOS3(), CHSesameLock, CHDev
         }
     }
 
-    protected fun reportBatteryData(payloadString: String) {
+    protected fun reportBatteryData(payloadString: String, onPercentage: ((Int) -> Unit)? = null) {
         L.d("os3lock", "[reportBatteryData] ${isInternetAvailable()}, ${!isConnectedByWM2}, payload: $payloadString")
         CHAPIClientBiz.postBatteryData(deviceId.toString().uppercase(), payloadString) {
             it.onSuccess { resp ->
-                batteryPercentage = ((resp.data as? Map<*, *>)?.get("batteryPercentage") as? Number)?.toInt()
+                val percentage = ((resp.data as? Map<*, *>)?.get("batteryPercentage") as? Number)?.toInt()
+                batteryPercentage = percentage
+                if (percentage != null) onPercentage?.invoke(percentage)
             }
         }
     }
