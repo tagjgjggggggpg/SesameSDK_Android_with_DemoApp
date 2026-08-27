@@ -33,6 +33,22 @@ private fun tracePrefix(deviceId: String? = null): String = buildString {
     if (deviceId != null) append(" dev=").append(p2DiagnosticDeviceId(deviceId))
 }
 
+internal sealed interface TimedBleCallbackResult {
+    data object Success : TimedBleCallbackResult
+    data class Failure(val error: Throwable) : TimedBleCallbackResult
+    data object Timeout : TimedBleCallbackResult
+}
+
+internal suspend fun awaitTimedBleCallback(
+    timeoutMs: Long,
+    callbackAwaiter: suspend () -> Throwable?,
+): TimedBleCallbackResult {
+    val completed = withTimeoutOrNull(timeoutMs) {
+        callbackAwaiter()?.let { TimedBleCallbackResult.Failure(it) } ?: TimedBleCallbackResult.Success
+    }
+    return completed ?: TimedBleCallbackResult.Timeout
+}
+
 internal interface SesameGroupLockRuntime {
     suspend fun resolveDevice(deviceId: String): Result<CHDevices>
     fun isStrictBleTransportReady(device: CHDevices): Boolean
@@ -80,12 +96,25 @@ internal class ProductionSesameGroupLockRuntime : SesameGroupLockRuntime {
         p2GroupLog("$prefix ensureScan start initialized=$scanInitialized scanning=${CHBleManager.mScanning}")
         if (scanInitialized) { p2GroupLog("$prefix ensureScan cached error=$scanError elapsed=${System.currentTimeMillis() - started}ms"); return scanError }
         val wasEnabled = CHBleManager.mScanning == CHScanStatus.Enable
-        val error = withTimeoutOrNull(SCAN_START_TIMEOUT_MS) { awaitSimpleBleResult { callback -> CHBleManager.enableScan(false, callback) } }
-            ?: TimeoutException("BLE scan start timed out")
+        val outcome = awaitTimedBleCallback(SCAN_START_TIMEOUT_MS) {
+            awaitSimpleBleResult { callback -> CHBleManager.enableScan(false, callback) }
+        }
         scanInitialized = true
-        scanStartedByGateway = error == null && !wasEnabled
-        scanError = error?.message ?: error?.javaClass?.simpleName
-        if (error is TimeoutException) p2GroupLog("$prefix ensureScan timeout elapsed=${System.currentTimeMillis() - started}ms")
+        when (outcome) {
+            TimedBleCallbackResult.Success -> {
+                scanStartedByGateway = !wasEnabled
+                scanError = null
+            }
+            is TimedBleCallbackResult.Failure -> {
+                scanStartedByGateway = false
+                scanError = outcome.error.message ?: outcome.error.javaClass.simpleName
+            }
+            TimedBleCallbackResult.Timeout -> {
+                scanStartedByGateway = false
+                scanError = "BLE scan start timed out"
+                p2GroupLog("$prefix ensureScan timeout elapsed=${System.currentTimeMillis() - started}ms")
+            }
+        }
         p2GroupLog("$prefix ensureScan end error=$scanError startedByGateway=$scanStartedByGateway scanning=${CHBleManager.mScanning} elapsed=${System.currentTimeMillis() - started}ms")
         return scanError
     }
