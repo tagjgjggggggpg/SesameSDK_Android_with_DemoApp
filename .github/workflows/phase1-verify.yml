@@ -6,9 +6,9 @@ on:
       - codex/sesame-group-phase1
 
 jobs:
-  lint-inventory:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,25 +22,31 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
-      - name: Run lint without hiding existing failures
+      - name: Unit tests
+        run: ./gradlew :sesame-sdk:testDebugUnitTest :app:testDebugUnitTest --stacktrace
+
+      - name: Assemble debug
+        run: ./gradlew :sesame-sdk:assembleDebug :app:assembleDebug --stacktrace
+
+      - name: Lint inventory
         shell: bash
         run: |
           set +e
           ./gradlew :sesame-sdk:lintDebug :app:lintDebug --stacktrace
           status=$?
           echo "lint_exit_code=$status"
-          echo "--- app lint errors ---"
           report="app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
-          if [ -f "$report" ]; then
-            grep -n "Error:" "$report" || true
-          else
-            echo "app lint text report not found"
-          fi
-          echo "--- sdk lint errors ---"
           sdk_report="sesame-sdk/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
+          echo "--- app lint errors ---"
+          [ -f "$report" ] && grep -n "Error:" "$report" || true
+          echo "--- sdk lint errors ---"
+          [ -f "$sdk_report" ] && grep -n "Error:" "$sdk_report" || true
+          echo "--- Phase 1 app warnings ---"
+          if [ -f "$report" ]; then
+            grep -nE '(lockgroup/|DeviceListFG\.kt|fg_devicelist\.xml|AndroidManifest\.xml).*Warning:' "$report" || true
+          fi
+          echo "--- Phase 1 sdk warnings ---"
           if [ -f "$sdk_report" ]; then
-            grep -n "Error:" "$sdk_report" || true
-          else
-            echo "sdk lint text report not found"
+            grep -nE '(CHSesame5Device\.kt|StrictSesame5CommandExecutor\.kt|CHSesame5\.kt).*Warning:' "$sdk_report" || true
           fi
           exit 0
