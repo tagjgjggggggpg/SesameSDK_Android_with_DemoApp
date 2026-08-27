@@ -16,6 +16,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Restore stable Phase 2 debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: sesame-phase2-debug-keystore-v1
       - name: Verify Phase 2 and build debug APK
         run: |
           chmod +x gradlew
