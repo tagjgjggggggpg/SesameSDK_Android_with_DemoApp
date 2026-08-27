@@ -121,6 +121,12 @@ androidComponents {
     }
 }
 
+tasks.configureEach { task ->
+    if (task.name == "processDebugGoogleServices") {
+        task.enabled = false
+    }
+}
+
 dependencies {
     coreLibraryDesugaring libs.desugar.jdk.libs
 
