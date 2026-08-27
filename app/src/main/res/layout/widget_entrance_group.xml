@@ -3,54 +3,51 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@android:color/white"
+    android:gravity="center_horizontal"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="10dp">
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="玄関"
         android:textColor="@android:color/black"
-        android:textSize="18sp"
+        android:textSize="16sp"
         android:textStyle="bold" />
+
+    <FrameLayout
+        android:id="@+id/entrance_widget_action"
+        android:layout_width="88dp"
+        android:layout_height="88dp"
+        android:layout_marginTop="4dp"
+        android:foreground="?android:attr/selectableItemBackgroundBorderless">
+        <ImageView
+            android:id="@+id/entrance_widget_icon"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="玄関を操作"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/icon_lock" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/entrance_widget_state"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="状態: 不明"
-        android:textColor="@android:color/black" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/entrance_widget_lock"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="施錠" />
-
-        <Button
-            android:id="@+id/entrance_widget_unlock"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_weight="1"
-            android:text="解錠" />
-    </LinearLayout>
+        android:gravity="center"
+        android:maxLines="2"
+        android:text="1:不明 2:不明"
+        android:textColor="@android:color/black"
+        android:textSize="13sp" />
 
     <TextView
         android:id="@+id/entrance_widget_status"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:maxLines="2"
+        android:gravity="center"
+        android:maxLines="1"
         android:text=""
         android:textColor="@android:color/darker_gray"
-        android:textSize="12sp" />
+        android:textSize="10sp" />
 </LinearLayout>
