@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicLong
 interface GroupLockGateway {
     suspend fun operate(deviceId: String, action: GroupLockAction): DeviceOperationResult
     suspend fun getState(deviceId: String): LockState
+    suspend fun getDeviceSnapshot(deviceId: String): EntranceDeviceSnapshot = EntranceDeviceSnapshot(getState(deviceId), fresh = true)
     suspend fun finishOperation() {}
 }
 
@@ -29,17 +30,20 @@ class GroupLockController(
     private val gateway: GroupLockGateway,
     private val interDeviceDelayMs: Long = 500L,
     private val delayBetweenDevices: suspend (Long) -> Unit = { delay(it) },
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun lockGroup(group: LockGroup): GroupOperationResult = operate(group, GroupLockAction.LOCK)
     suspend fun unlockGroup(group: LockGroup): GroupOperationResult = operate(group, GroupLockAction.UNLOCK)
-
     suspend fun getGroupState(group: LockGroup): GroupState = aggregateGroupState(group.deviceIds.map { gateway.getState(it) })
 
     suspend fun getEntranceStateSnapshot(group: LockGroup): EntranceGroupStateSnapshot {
-        val states = group.deviceIds.take(2).map { gateway.getState(it) }
+        val devices = group.deviceIds.take(2).map { id ->
+            try { gateway.getDeviceSnapshot(id) } catch (_: Throwable) { EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false) }
+        }
         return EntranceGroupStateSnapshot(
-            deviceA = states.getOrNull(0) ?: LockState.UNKNOWN,
-            deviceB = states.getOrNull(1) ?: LockState.UNKNOWN,
+            deviceA = devices.getOrNull(0) ?: EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false),
+            deviceB = devices.getOrNull(1) ?: EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false),
+            capturedAt = nowMillis(),
         )
     }
 
