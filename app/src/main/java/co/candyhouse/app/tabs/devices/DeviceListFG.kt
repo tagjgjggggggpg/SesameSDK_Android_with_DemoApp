@@ -1,6 +1,7 @@
 package co.candyhouse.app.tabs.devices
 
 import android.content.Context
+import android.content.Intent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -12,6 +13,7 @@ import androidx.recyclerview.widget.SimpleItemAnimator
 import co.candyhouse.app.R
 import co.candyhouse.app.databinding.FgDevicelistBinding
 import co.candyhouse.app.ext.webview.data.WebViewConfig
+import co.candyhouse.app.lockgroup.LockGroupActivity
 import co.candyhouse.app.tabs.HomeFragment
 import co.candyhouse.app.tabs.devices.internal.InternalTestBottomSheet
 import co.candyhouse.app.tabs.devices.ssm2.getLevel
@@ -92,6 +94,9 @@ class DeviceListFG : HomeFragment<FgDevicelistBinding>() {
         bind.internalTest.setOnLongClickListener {
             showInternalTestDialog()
             true
+        }
+        bind.lockGroupShortcut.setOnClickListener {
+            startActivity(Intent(requireContext(), LockGroupActivity::class.java))
         }
 
         setupSearchBehavior()
