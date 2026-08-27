@@ -1,6 +1,7 @@
 package co.candyhouse.sesame.ble.os3
 
 import android.annotation.SuppressLint
+import co.candyhouse.sesame.BuildConfig
 import co.candyhouse.sesame.ble.DeviceSegmentType
 import co.candyhouse.sesame.ble.SSM3PublishPayload
 import co.candyhouse.sesame.ble.SSM3ResponsePayload
@@ -40,6 +41,8 @@ internal class CHSesame5Device(
 
     override var mechSetting: CHSesame5MechSettings? = null
     override var opsSetting: CHSesame5OpsSettings? = null
+    private fun diagId(): String = deviceId?.toString()?.takeLast(6) ?: "unknown"
+    private fun diag(message: String) { if (BuildConfig.DEBUG) L.d("P2StrictBLE", "dev=${diagId()} $message") }
 
     override fun goIOT() {
         L.d("hcia", "[ss5]goIOT:$deviceId")
@@ -47,243 +50,98 @@ internal class CHSesame5Device(
             result.onSuccess { resource ->
                 L.d("hcia", "[ss5][iot]")
                 L.d("hcia", "🥝 [ss5]ss5_shadow裡存的hub3列表:${resource.data.state.reported.wm2s}")
-
                 resource.data.state.reported.wm2s?.let { wm2s ->
                     L.d("hcia", "[ss5]wm2s:$wm2s")
                     isConnectedByWM2 = wm2s.map { it.value.hexStringToByteArray().first().toInt() }.contains(1)
                 }
-
                 if (isConnectedByWM2) {
                     resource.data.state.reported.mechst?.let { mechShadow ->
                         val res: CHResult<CHEmpty> = { }
-                        if (!isBleAvailable(res)) {
-                            mechStatus = CHSesame5MechStatus(
-                                CHSesame2MechStatus(mechShadow.hexStringToByteArray()).ss5Adapter()
-                            )
-                        }
+                        if (!isBleAvailable(res)) mechStatus = CHSesame5MechStatus(CHSesame2MechStatus(mechShadow.hexStringToByteArray()).ss5Adapter())
                     }
-                    deviceShadowStatus =
-                        if (mechStatus!!.isInLockRange) CHDeviceStatus.Locked else CHDeviceStatus.Unlocked
-                } else {
-                    deviceShadowStatus = null
-                }
+                    deviceShadowStatus = if (mechStatus!!.isInLockRange) CHDeviceStatus.Locked else CHDeviceStatus.Unlocked
+                } else deviceShadowStatus = null
             }
         }
     }
 
     override fun configureLockPosition(lockTarget: Short, unlockTarget: Short, result: CHResult<CHEmpty>) {
-        val cmd = SesameOS3Payload(
-            SesameItemCode.mechSetting.value,
-            lockTarget.toReverseBytes() + unlockTarget.toReverseBytes()
-        )
+        val cmd = SesameOS3Payload(SesameItemCode.mechSetting.value, lockTarget.toReverseBytes() + unlockTarget.toReverseBytes())
         sendCommand(cmd, DeviceSegmentType.cipher) { res ->
             if (res.cmdResultCode == SesameResultCode.success.value) {
-                mechSetting?.lockPosition = lockTarget
-                mechSetting?.unlockPosition = unlockTarget
+                mechSetting?.lockPosition = lockTarget; mechSetting?.unlockPosition = unlockTarget
                 result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
-            } else {
-                result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
-            }
+            } else result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
         }
     }
-
-    override fun sendAdvProductTypeCommand(data: ByteArray, result: CHResult<CHEmpty>) {
-        val cmd = SesameOS3Payload(SesameItemCode.SS3_ITEM_CODE_SET_ADV_PRODUCT_TYPE.value, data)
-        sendCommand(cmd, DeviceSegmentType.cipher) { res ->
-            if (res.cmdResultCode == SesameResultCode.success.value) {
-                result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
-            } else {
-                result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
-            }
-        }
-    }
-
-    override fun autolock(delay: Int, result: CHResult<Int>) {
-        if (!isBleAvailable(result)) return
-        sendCommand(
-            SesameOS3Payload(SesameItemCode.autolock.value, delay.toShort().toReverseBytes()),
-            DeviceSegmentType.cipher
-        ) {
-            mechSetting?.autoLockSecond = delay.toShort()
-            result.invoke(Result.success(CHResultState.CHResultStateBLE(delay)))
-        }
-    }
-
-    override fun opSensorControl(isEnable: Int, result: CHResult<Int>) {
-        if (!isBleAvailable(result)) return
-        sendCommand(
-            SesameOS3Payload(SesameItemCode.OPS_CONTROL.value, isEnable.toShort().toReverseBytes()),
-            DeviceSegmentType.cipher
-        ) {
-            opsSetting?.opsLockSecond = isEnable.toUShort()
-            result.invoke(Result.success(CHResultState.CHResultStateBLE(isEnable)))
-        }
-    }
-
-    override fun magnet(result: CHResult<CHEmpty>) {
-        if (!isBleAvailable(result)) return
-        sendCommand(
-            SesameOS3Payload(SesameItemCode.magnet.value, byteArrayOf()),
-            DeviceSegmentType.cipher
-        ) {
-            result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
-        }
-    }
+    override fun sendAdvProductTypeCommand(data: ByteArray, result: CHResult<CHEmpty>) { sendCommand(SesameOS3Payload(SesameItemCode.SS3_ITEM_CODE_SET_ADV_PRODUCT_TYPE.value, data), DeviceSegmentType.cipher) { res -> if (res.cmdResultCode == SesameResultCode.success.value) result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty()))) else result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt()))) } }
+    override fun autolock(delay: Int, result: CHResult<Int>) { if (!isBleAvailable(result)) return; sendCommand(SesameOS3Payload(SesameItemCode.autolock.value, delay.toShort().toReverseBytes()), DeviceSegmentType.cipher) { mechSetting?.autoLockSecond = delay.toShort(); result.invoke(Result.success(CHResultState.CHResultStateBLE(delay))) } }
+    override fun opSensorControl(isEnable: Int, result: CHResult<Int>) { if (!isBleAvailable(result)) return; sendCommand(SesameOS3Payload(SesameItemCode.OPS_CONTROL.value, isEnable.toShort().toReverseBytes()), DeviceSegmentType.cipher) { opsSetting?.opsLockSecond = isEnable.toUShort(); result.invoke(Result.success(CHResultState.CHResultStateBLE(isEnable))) } }
+    override fun magnet(result: CHResult<CHEmpty>) { if (!isBleAvailable(result)) return; sendCommand(SesameOS3Payload(SesameItemCode.magnet.value, byteArrayOf()), DeviceSegmentType.cipher) { result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty()))) } }
 
     override fun toggle(historytag: ByteArray?, result: CHResult<CHEmpty>) {
-        if (deviceStatus.value == CHDeviceLoginStatus.logined && isBleAvailable(result)) {
-            if (deviceStatus == CHDeviceStatus.Locked) {
-                unlock(historytag, result)
-            } else {
-                lock(historytag, result)
-            }
-        } else {
-            sesame2KeyData?.apply {
-                CHAPIClientBiz.cmdSesame(
-                    SesameItemCode.toggle,
-                    this@CHSesame5Device,
-                    this.historyTagIOT(historytag),
-                    result
-                )
-            }
-        }
+        if (deviceStatus.value == CHDeviceLoginStatus.logined && isBleAvailable(result)) { if (deviceStatus == CHDeviceStatus.Locked) unlock(historytag, result) else lock(historytag, result) }
+        else sesame2KeyData?.apply { CHAPIClientBiz.cmdSesame(SesameItemCode.toggle, this@CHSesame5Device, this.historyTagIOT(historytag), result) }
     }
-
     override fun unlock(historytag: ByteArray?, result: CHResult<CHEmpty>) {
-        if (deviceStatus.value == CHDeviceLoginStatus.unlogined && deviceShadowStatus != null) {
-            CHAPIClientBiz.cmdSesame(SesameItemCode.unlock, this, sesame2KeyData!!.historyTagIOT(historytag), result)
-            return
-        }
-        if (!isBleAvailable(result)) {
-            CHAPIClientBiz.cmdSesame(SesameItemCode.toggle, this, sesame2KeyData!!.historyTagIOT(historytag), result)
-            return
-        }
-        sendCommand(
-            SesameOS3Payload(SesameItemCode.unlock.value, sesame2KeyData!!.historyTagBLE(historytag)),
-            DeviceSegmentType.cipher
-        ) { res ->
-            if (res.cmdResultCode == SesameResultCode.success.value) {
-                result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
-            } else {
-                result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
-            }
-        }
+        if (deviceStatus.value == CHDeviceLoginStatus.unlogined && deviceShadowStatus != null) { CHAPIClientBiz.cmdSesame(SesameItemCode.unlock, this, sesame2KeyData!!.historyTagIOT(historytag), result); return }
+        if (!isBleAvailable(result)) { CHAPIClientBiz.cmdSesame(SesameItemCode.toggle, this, sesame2KeyData!!.historyTagIOT(historytag), result); return }
+        sendCommand(SesameOS3Payload(SesameItemCode.unlock.value, sesame2KeyData!!.historyTagBLE(historytag)), DeviceSegmentType.cipher) { res -> if (res.cmdResultCode == SesameResultCode.success.value) result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty()))) else result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt()))) }
     }
-
     override fun lock(historytag: ByteArray?, result: CHResult<CHEmpty>) {
-        if (deviceStatus.value == CHDeviceLoginStatus.unlogined && deviceShadowStatus != null) {
-            CHAPIClientBiz.cmdSesame(SesameItemCode.lock, this, sesame2KeyData!!.historyTagIOT(historytag), result)
-            return
-        }
-        if (!isBleAvailable(result)) {
-            CHAPIClientBiz.cmdSesame(SesameItemCode.toggle, this, sesame2KeyData!!.historyTagIOT(historytag), result)
-            return
-        }
-        sendCommand(
-            SesameOS3Payload(SesameItemCode.lock.value, sesame2KeyData!!.historyTagBLE(historytag)),
-            DeviceSegmentType.cipher
-        ) { res ->
-            if (res.cmdResultCode == SesameResultCode.success.value) {
-                result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
-            } else {
-                result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
-            }
-        }
+        if (deviceStatus.value == CHDeviceLoginStatus.unlogined && deviceShadowStatus != null) { CHAPIClientBiz.cmdSesame(SesameItemCode.lock, this, sesame2KeyData!!.historyTagIOT(historytag), result); return }
+        if (!isBleAvailable(result)) { CHAPIClientBiz.cmdSesame(SesameItemCode.toggle, this, sesame2KeyData!!.historyTagIOT(historytag), result); return }
+        sendCommand(SesameOS3Payload(SesameItemCode.lock.value, sesame2KeyData!!.historyTagBLE(historytag)), DeviceSegmentType.cipher) { res -> if (res.cmdResultCode == SesameResultCode.success.value) result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty()))) else result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt()))) }
     }
 
     override fun strictUnlock(historytag: ByteArray?, result: CHResult<CHEmpty>) {
-        StrictSesame5CommandExecutor(
-            isBleAvailable = { strictBleAvailability?.invoke(result) ?: isBleAvailable(result) },
-            sendCommand = { itemCode -> dispatchStrictBleCommand(itemCode, historytag, result) }
-        ).unlock()
+        diag("strictUnlock call logical=$deviceStatus")
+        StrictSesame5CommandExecutor(isBleAvailable = { strictBleAvailability?.invoke(result) ?: isBleAvailable(result) }, sendCommand = { itemCode -> dispatchStrictBleCommand(itemCode, historytag, result) }).unlock()
     }
-
     override fun strictLock(historytag: ByteArray?, result: CHResult<CHEmpty>) {
-        StrictSesame5CommandExecutor(
-            isBleAvailable = { strictBleAvailability?.invoke(result) ?: isBleAvailable(result) },
-            sendCommand = { itemCode -> dispatchStrictBleCommand(itemCode, historytag, result) }
-        ).lock()
+        diag("strictLock call logical=$deviceStatus")
+        StrictSesame5CommandExecutor(isBleAvailable = { strictBleAvailability?.invoke(result) ?: isBleAvailable(result) }, sendCommand = { itemCode -> dispatchStrictBleCommand(itemCode, historytag, result) }).lock()
     }
-
-    private fun dispatchStrictBleCommand(
-        itemCode: SesameItemCode,
-        historytag: ByteArray?,
-        result: CHResult<CHEmpty>
-    ) {
-        strictCommandSink?.let { sink ->
-            sink(itemCode, historytag, result)
-            return
-        }
+    private fun dispatchStrictBleCommand(itemCode: SesameItemCode, historytag: ByteArray?, result: CHResult<CHEmpty>) {
+        diag("dispatchStrictBleCommand item=$itemCode logical=$deviceStatus")
+        strictCommandSink?.let { sink -> sink(itemCode, historytag, result); return }
         sendStrictBleCommand(itemCode, historytag, result)
     }
-
-    private fun sendStrictBleCommand(
-        itemCode: SesameItemCode,
-        historytag: ByteArray?,
-        result: CHResult<CHEmpty>
-    ) {
-        check(itemCode == SesameItemCode.lock || itemCode == SesameItemCode.unlock) {
-            "Strict lock operations may only send lock or unlock"
-        }
+    private fun sendStrictBleCommand(itemCode: SesameItemCode, historytag: ByteArray?, result: CHResult<CHEmpty>) {
+        check(itemCode == SesameItemCode.lock || itemCode == SesameItemCode.unlock) { "Strict lock operations may only send lock or unlock" }
+        diag("sendStrictBleCommand start item=$itemCode logical=$deviceStatus")
         val keyData = sesame2KeyData
-        if (keyData == null) {
-            result.invoke(Result.failure(IllegalStateException("SESAME key data is unavailable")))
-            return
-        }
+        if (keyData == null) { diag("sendStrictBleCommand fail item=$itemCode reason=no-key-data"); result.invoke(Result.failure(IllegalStateException("SESAME key data is unavailable"))); return }
         val command = SesameOS3Payload(itemCode.value, keyData.historyTagBLE(historytag))
         val responseHandler: (SSM3ResponsePayload) -> Unit = { res ->
-            if (res.cmdResultCode == SesameResultCode.success.value) {
-                result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
-            } else {
-                result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
-            }
+            diag("strict response item=$itemCode resultCode=${res.cmdResultCode} logical=$deviceStatus")
+            if (res.cmdResultCode == SesameResultCode.success.value) result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
+            else result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
         }
-        strictBleTransportSink?.let { transport ->
-            transport(command, DeviceSegmentType.cipher, responseHandler)
-            return
-        }
+        strictBleTransportSink?.let { transport -> diag("strict transport sink item=$itemCode"); transport(command, DeviceSegmentType.cipher, responseHandler); return }
+        diag("sendCommand enqueue item=$itemCode")
         sendCommand(command, DeviceSegmentType.cipher, responseHandler)
     }
 
     override fun onHistoryReceived(historyData: ByteArray) {}
-
-    override fun onHistoryReceivedInternal(historyData: ByteArray) {
-        onHistoryReceived(historyData)
+    override fun onHistoryReceivedInternal(historyData: ByteArray) { onHistoryReceived(historyData) }
+    override fun handleRegisterResponse(registerRes: SSM3ResponsePayload, serverSecret: String, result: CHResult<CHEmpty>) {
+        mechStatus = CHSesame5MechStatus(registerRes.payload.sliceArray(0..6)); mechSetting = CHSesame5MechSettings(registerRes.payload.sliceArray(7..12))
+        val eccPublicKeyFromSS5 = registerRes.payload.sliceArray(13..76); val ecdhSecret = EccKey.ecdh(eccPublicKeyFromSS5); val deviceSecret = ecdhSecret.sliceArray(0..15).toHexString()
+        saveDeviceAndCipher(deviceSecret, serverSecret, result); deviceStatus = if (mechStatus?.isInLockRange == true) CHDeviceStatus.Locked else CHDeviceStatus.Unlocked
     }
-
-    override fun handleRegisterResponse(
-        registerRes: SSM3ResponsePayload,
-        serverSecret: String,
-        result: CHResult<CHEmpty>
-    ) {
-        mechStatus = CHSesame5MechStatus(registerRes.payload.sliceArray(0..6))
-        mechSetting = CHSesame5MechSettings(registerRes.payload.sliceArray(7..12))
-        val eccPublicKeyFromSS5 = registerRes.payload.sliceArray(13..76)
-        val ecdhSecret = EccKey.ecdh(eccPublicKeyFromSS5)
-        val deviceSecret = ecdhSecret.sliceArray(0..15).toHexString()
-
-        saveDeviceAndCipher(deviceSecret, serverSecret, result)
-        deviceStatus = if (mechStatus?.isInLockRange == true) CHDeviceStatus.Locked else CHDeviceStatus.Unlocked
-    }
-
     override fun handleDevicePublish(receivePayload: SSM3PublishPayload) {
-        L.d("onGattSesamePublish", "[ss5] ${receivePayload.cmdItCode}, data: 0x${receivePayload.payload.toHexString()}")
-
         when (receivePayload.cmdItCode) {
             SesameItemCode.mechStatus.value -> {
+                val before = deviceStatus
+                diag("mechStatus publish received logicalBefore=$before")
                 mechStatus = CHSesame5MechStatus(receivePayload.payload)
                 deviceStatus = if (mechStatus!!.isInLockRange) CHDeviceStatus.Locked else CHDeviceStatus.Unlocked
+                diag("mechStatus publish applied logicalAfter=$deviceStatus")
                 reportBatteryData(receivePayload.payload.sliceArray(0..1).toHexString())
             }
-
-            SesameItemCode.mechSetting.value -> {
-                mechSetting = CHSesame5MechSettings(receivePayload.payload)
-            }
-
-            SesameItemCode.OPS_CONTROL.value -> {
-                opsSetting = CHSesame5OpsSettings(receivePayload.payload)
-                L.d("switch", "[ss5][opsSecond]:${opsSetting!!.opsLockSecond}")
-            }
+            SesameItemCode.mechSetting.value -> mechSetting = CHSesame5MechSettings(receivePayload.payload)
+            SesameItemCode.OPS_CONTROL.value -> { opsSetting = CHSesame5OpsSettings(receivePayload.payload); L.d("switch", "[ss5][opsSecond]:${opsSetting!!.opsLockSecond}") }
         }
     }
 }
