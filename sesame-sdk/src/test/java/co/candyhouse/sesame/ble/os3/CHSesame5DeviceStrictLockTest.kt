@@ -17,23 +17,23 @@ import org.junit.Test
 
 class CHSesame5DeviceStrictLockTest {
     @Test fun liveTracker_disconnectMakesStateInvalid() {
-        val tracker=Sesame5LiveBleStateTracker();tracker.onLiveMechStatus(CHSesame5LiveLockState.LOCKED,10)
+        val tracker=Sesame5LiveBleStateTracker();tracker.onLiveMechStatus(CHSesame5LiveLockState.LOCKED,10L)
         assertEquals(CHSesame5LiveLockState.LOCKED,tracker.snapshot(true)?.lockState)
         assertNull(tracker.snapshot(false))
     }
     @Test fun liveTracker_reconnectBeforeMechStatusHasNoState() {
-        val tracker=Sesame5LiveBleStateTracker();tracker.onLiveMechStatus(CHSesame5LiveLockState.LOCKED,10);tracker.invalidate()
+        val tracker=Sesame5LiveBleStateTracker();tracker.onLiveMechStatus(CHSesame5LiveLockState.LOCKED,10L);tracker.invalidate()
         assertNull(tracker.snapshot(true))
     }
     @Test fun liveTracker_reconnectAfterNewMechStatusRestoresState() {
-        val tracker=Sesame5LiveBleStateTracker();tracker.onLiveMechStatus(CHSesame5LiveLockState.LOCKED,10);tracker.invalidate();tracker.onLiveMechStatus(CHSesame5LiveLockState.UNLOCKED,20)
+        val tracker=Sesame5LiveBleStateTracker();tracker.onLiveMechStatus(CHSesame5LiveLockState.LOCKED,10L);tracker.invalidate();tracker.onLiveMechStatus(CHSesame5LiveLockState.UNLOCKED,20L)
         assertEquals(CHSesame5LiveLockState.UNLOCKED,tracker.snapshot(true)?.lockState)
-        assertEquals(20,tracker.snapshot(true)?.stateObservedAtMillis)
+        assertEquals(20L,tracker.snapshot(true)?.stateObservedAtMillis)
     }
     @Test fun batterySampleMustBelongToCurrentLiveMechStatus() {
-        val tracker=Sesame5LiveBleStateTracker();tracker.onLiveMechStatus(CHSesame5LiveLockState.LOCKED,10);tracker.onLiveMechStatus(CHSesame5LiveLockState.UNLOCKED,20);tracker.onBatteryPercentage(18,10)
+        val tracker=Sesame5LiveBleStateTracker();tracker.onLiveMechStatus(CHSesame5LiveLockState.LOCKED,10L);tracker.onLiveMechStatus(CHSesame5LiveLockState.UNLOCKED,20L);tracker.onBatteryPercentage(18,10L)
         assertNull(tracker.snapshot(true)?.batterySample)
-        tracker.onBatteryPercentage(18,20)
+        tracker.onBatteryPercentage(18,20L)
         assertEquals(18,tracker.snapshot(true)?.batterySample?.percentage)
     }
 
