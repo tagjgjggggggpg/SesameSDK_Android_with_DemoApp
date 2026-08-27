@@ -49,6 +49,9 @@ fun resolveEntranceExplicitActionFromFreshState(snapshot: EntranceGroupStateSnap
 const val LOW_BATTERY_THRESHOLD_PERCENT = 20
 const val LOW_BATTERY_RESET_PERCENT = 25
 
+internal fun isNewLiveBatterySample(device: EntranceDeviceSnapshot, lastProcessedAtMillis: Long): Boolean =
+    device.fresh && device.batteryPercent != null && (device.batterySampleObservedAtMillis?.let { it > lastProcessedAtMillis } == true)
+
 internal fun shouldSendLowBatteryAlert(freshBatteryPercent: Int?, alreadyAlerted: Boolean): Boolean =
     freshBatteryPercent != null && freshBatteryPercent <= LOW_BATTERY_THRESHOLD_PERCENT && !alreadyAlerted
 
