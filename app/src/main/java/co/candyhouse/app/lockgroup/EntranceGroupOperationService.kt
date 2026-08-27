@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 
 internal object EntranceGroupCommand { const val ONE_BUTTON="co.candyhouse.app.lockgroup.ONE_BUTTON"; fun isSupported(a:String?)=a==ONE_BUTTON }
 internal suspend fun executeEntranceGroupAction(c:GroupLockController,g:LockGroup,a:GroupLockAction)=when(a){GroupLockAction.LOCK->c.lockGroup(g);GroupLockAction.UNLOCK->c.unlockGroup(g)}
-internal suspend fun resolveAndExecuteEntranceOneButton(c:GroupLockController,g:LockGroup):Pair<EntranceGroupStateSnapshot,GroupOperationResult>{val fresh=c.getEntranceStateSnapshot(g);return fresh to executeEntranceGroupAction(c,g,resolveEntranceExplicitActionFromFreshState(fresh))}
+internal suspend fun resolveAndExecuteEntranceOneButton(c:GroupLockController,g:LockGroup):Pair<EntranceGroupStateSnapshot,GroupOperationResult?>{val fresh=c.getEntranceStateSnapshot(g);val action=resolveEntranceExplicitActionFromFreshState(fresh)?:return fresh to null;return fresh to executeEntranceGroupAction(c,g,action)}
 
 class EntranceGroupOperationService:Service(){
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
@@ -33,18 +33,31 @@ class EntranceGroupOperationService:Service(){
         scope.launch{
             val group=SharedPreferencesLockGroupStore().getGroup(SharedPreferencesLockGroupStore.DEFAULT_GROUP_ID)?:SharedPreferencesLockGroupStore.DEFAULT_GROUP
             val controller=GroupLockController(SesameGroupLockGateway())
-            val result=try{val fresh=controller.getEntranceStateSnapshot(group);EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService,fresh,"状態を確認しました");processFreshBatteryAlerts(group,fresh);executeEntranceGroupAction(controller,group,resolveEntranceExplicitActionFromFreshState(fresh))}
-            catch(c:CancellationException){throw c}catch(e:Throwable){GroupOperationResult(group.id,GroupLockAction.UNLOCK,GroupOperationStatus.FAILURE,emptyList(),e.message?:e::class.java.simpleName)}
-            val post=runCatching{controller.getEntranceStateSnapshot(group)}.getOrElse{EntranceGroupStateSnapshot(EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),System.currentTimeMillis())}
-            val message=resultText(result);EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService,post,message);processFreshBatteryAlerts(group,post);refreshTile();Toast.makeText(this@EntranceGroupOperationService,message,Toast.LENGTH_LONG).show();stopForeground(STOP_FOREGROUND_REMOVE);if(result.status!=GroupOperationStatus.SUCCESS)notifyFailure(message);stopSelf(startId)
+            val result:GroupOperationResult?
+            val initial:EntranceGroupStateSnapshot
+            try{val pair=resolveAndExecuteEntranceOneButton(controller,group);initial=pair.first;result=pair.second}
+            catch(c:CancellationException){throw c}catch(_:Throwable){initial=EntranceGroupStateSnapshot(EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),0L);result=null}
+            EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService,initial,if(result==null)"状態確認不能" else "状態を確認しました");processFreshBatteryAlerts(group,initial)
+            val post=if(result==null)initial else runCatching{controller.getEntranceStateSnapshot(group)}.getOrElse{EntranceGroupStateSnapshot(EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),0L)}
+            val message=resultText(result);EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService,post,message);processFreshBatteryAlerts(group,post);refreshTile();Toast.makeText(this@EntranceGroupOperationService,message,Toast.LENGTH_LONG).show();stopForeground(STOP_FOREGROUND_REMOVE);if(result!=null&&result.status!=GroupOperationStatus.SUCCESS)notifyFailure(message);stopSelf(startId)
         };return START_NOT_STICKY
     }
     private fun processFreshBatteryAlerts(group:LockGroup,s:EntranceGroupStateSnapshot){
-        val prefs=getSharedPreferences(BATTERY_PREFS,Context.MODE_PRIVATE);listOf(s.deviceA,s.deviceB).forEachIndexed{i,d->if(!d.fresh)return@forEachIndexed;val id=group.deviceIds.getOrNull(i)?:return@forEachIndexed;val key="alerted_$id";val old=prefs.getBoolean(key,false);if(shouldSendLowBatteryAlert(d.batteryPercent,old))notifyLowBattery(i,d.batteryPercent!!);prefs.edit().putBoolean(key,nextLowBatteryAlerted(d.batteryPercent,old)).apply()}
+        val prefs=getSharedPreferences(BATTERY_PREFS,Context.MODE_PRIVATE)
+        listOf(s.deviceA,s.deviceB).forEachIndexed{i,d->
+            if(!d.fresh)return@forEachIndexed
+            val sampleAt=d.batterySampleObservedAtMillis?:return@forEachIndexed
+            val percent=d.batteryPercent?:return@forEachIndexed
+            val id=group.deviceIds.getOrNull(i)?:return@forEachIndexed
+            val sampleKey="sample_$id";if(sampleAt<=prefs.getLong(sampleKey,Long.MIN_VALUE))return@forEachIndexed
+            val alertKey="alerted_$id";val old=prefs.getBoolean(alertKey,false)
+            if(shouldSendLowBatteryAlert(percent,old))notifyLowBattery(i,percent)
+            prefs.edit().putLong(sampleKey,sampleAt).putBoolean(alertKey,nextLowBatteryAlerted(percent,old)).apply()
+        }
     }
-    private fun notifyLowBattery(index:Int,percent:Int){getSystemService(NotificationManager::class.java).notify(LOW_BATTERY_NOTIFICATION_BASE+index,NotificationCompat.Builder(this,CHANNEL_ID).setSmallIcon(R.drawable.small_icon).setContentTitle("SESAME 玄関").setContentText("${index+1}番の電池残量が${percent}%です").setAutoCancel(true).build())}
+    private fun notifyLowBattery(index:Int,percent:Int){runCatching{getSystemService(NotificationManager::class.java).notify(LOW_BATTERY_NOTIFICATION_BASE+index,NotificationCompat.Builder(this,CHANNEL_ID).setSmallIcon(R.drawable.small_icon).setContentTitle("SESAME 玄関").setContentText("${index+1}番の電池残量が${percent}%です").setAutoCancel(true).build())}}
     override fun onDestroy(){scope.cancel();super.onDestroy()};override fun onBind(intent:Intent?):IBinder?=null
-    private fun resultText(r:GroupOperationResult)=when(r.status){GroupOperationStatus.SUCCESS->if(r.action==GroupLockAction.LOCK)"玄関を施錠しました" else "玄関を解錠しました";GroupOperationStatus.PARTIAL->"玄関: 一部の端末で操作に失敗しました";GroupOperationStatus.FAILURE->"玄関: 操作に失敗しました";GroupOperationStatus.BUSY->"玄関: 別の操作を実行中です"}
+    private fun resultText(r:GroupOperationResult?)=when{r==null->"玄関: 状態確認不能";r.status==GroupOperationStatus.SUCCESS&&r.action==GroupLockAction.LOCK->"玄関を施錠しました";r.status==GroupOperationStatus.SUCCESS->"玄関を解錠しました";r.status==GroupOperationStatus.PARTIAL->"玄関: 一部の端末で操作に失敗しました";r.status==GroupOperationStatus.FAILURE->"玄関: 操作に失敗しました";else->"玄関: 別の操作を実行中です"}
     private fun notification(t:String)=NotificationCompat.Builder(this,CHANNEL_ID).setSmallIcon(R.drawable.small_icon).setContentTitle("SESAME 玄関").setContentText(t).setOnlyAlertOnce(true).setOngoing(true).build()
     private fun notifyFailure(t:String){runCatching{getSystemService(NotificationManager::class.java).notify(RESULT_NOTIFICATION_ID,NotificationCompat.Builder(this,CHANNEL_ID).setSmallIcon(R.drawable.small_icon).setContentTitle("SESAME 玄関").setContentText(t).setAutoCancel(true).build())}}
     private fun createNotificationChannel(){if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID,"玄関グループ操作",NotificationManager.IMPORTANCE_LOW))}
