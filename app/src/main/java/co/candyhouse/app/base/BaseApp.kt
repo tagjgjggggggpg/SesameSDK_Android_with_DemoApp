@@ -54,10 +54,14 @@ open class BaseApp : Application() {
             SharedPreferencesUtils.init(PreferenceManager.getDefaultSharedPreferences(this))
         }
         AppIdentifyIdUtil.warmUp(this)
-        setupCrashlytics()
+        if (!BuildConfig.DEBUG) {
+            setupCrashlytics()
+        }
         initializeAWS()
         initializeWebViewProvider()
-        setupSubscriptionManager()
+        if (!BuildConfig.DEBUG) {
+            setupSubscriptionManager()
+        }
     }
 
     private fun setupCrashlytics() {
