@@ -121,13 +121,18 @@ internal class CHSesame5Device(
         if (keyData == null) { diag("sendStrictBleCommand fail item=$itemCode reason=no-key-data"); result.invoke(Result.failure(IllegalStateException("SESAME key data is unavailable"))); return }
         val command = SesameOS3Payload(itemCode.value, keyData.historyTagBLE(historytag))
         val responseHandler: (SSM3ResponsePayload) -> Unit = { res ->
-            diag("strict response item=$itemCode resultCode=${res.cmdResultCode} logical=$deviceStatus")
+            diag("strict response item=$itemCode resultCode=${res.cmdResultCode} logical=$deviceStatus callbackPresentBeforeRemove=${cmdCallBack.containsKey(command.itemCode)} at=${System.currentTimeMillis()}")
             if (res.cmdResultCode == SesameResultCode.success.value) result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty())))
             else result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt())))
         }
         strictBleTransportSink?.let { transport -> diag("strict transport sink item=$itemCode"); transport(command, DeviceSegmentType.cipher, responseHandler); return }
+        val existingCallback = cmdCallBack.containsKey(command.itemCode)
+        val registerAt = System.currentTimeMillis()
+        diag("OS3 callback register start item=$itemCode existing=$existingCallback at=$registerAt logical=$deviceStatus gattPresent=${mBluetoothGatt != null} characteristicPresent=${mCharacteristic != null}")
+        if (existingCallback) diag("WARNING OS3 callback overwrite attempt item=$itemCode at=$registerAt")
         diag("sendCommand enqueue item=$itemCode")
         sendCommand(command, DeviceSegmentType.cipher, responseHandler)
+        diag("OS3 callback register end item=$itemCode present=${cmdCallBack.containsKey(command.itemCode)} at=${System.currentTimeMillis()} logical=$deviceStatus gattPresent=${mBluetoothGatt != null} characteristicPresent=${mCharacteristic != null}")
     }
 
     override fun onHistoryReceived(historyData: ByteArray) {}
