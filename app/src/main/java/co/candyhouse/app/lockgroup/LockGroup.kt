@@ -10,47 +10,76 @@ enum class GroupLockAction { LOCK, UNLOCK }
 enum class LockState { LOCKED, UNLOCKED, UNKNOWN }
 enum class GroupState { LOCKED, UNLOCKED, MIXED, UNKNOWN }
 enum class GroupOperationStatus { SUCCESS, PARTIAL, FAILURE, BUSY }
-enum class SnapshotConfirmation { FULL, PARTIAL, NONE }
 
 data class EntranceDeviceSnapshot(
     val state: LockState,
+    val live: Boolean = false,
+    val observedAt: Long? = null,
     val batteryPercent: Int? = null,
-    val fresh: Boolean = false,
 )
 
 data class EntranceGroupStateSnapshot(
     val deviceA: EntranceDeviceSnapshot,
     val deviceB: EntranceDeviceSnapshot,
-    val capturedAt: Long,
 ) {
-    constructor(deviceA: LockState, deviceB: LockState) : this(
-        EntranceDeviceSnapshot(deviceA, fresh = deviceA != LockState.UNKNOWN),
-        EntranceDeviceSnapshot(deviceB, fresh = deviceB != LockState.UNKNOWN),
-        0L,
-    )
+    val groupState: GroupState
+        get() = aggregateGroupState(listOf(deviceA.state, deviceB.state))
 
-    val groupState: GroupState get() = aggregateGroupState(listOf(deviceA.state, deviceB.state))
-    val confirmation: SnapshotConfirmation get() = when (listOf(deviceA, deviceB).count { it.fresh && it.state != LockState.UNKNOWN }) {
-        2 -> SnapshotConfirmation.FULL
-        1 -> SnapshotConfirmation.PARTIAL
-        else -> SnapshotConfirmation.NONE
+    val liveCount: Int
+        get() = listOf(deviceA, deviceB).count { it.live && it.state != LockState.UNKNOWN }
+
+    val latestObservedAt: Long?
+        get() = listOfNotNull(
+            deviceA.observedAt.takeIf { deviceA.live },
+            deviceB.observedAt.takeIf { deviceB.live },
+        ).maxOrNull()
+}
+
+/**
+ * One-button decision uses only state originating from a currently-valid live BLE mechStatus.
+ * No cache, shadow, or plain deviceStatus value can select an action.
+ */
+fun resolveEntranceExplicitActionFromLiveState(
+    snapshot: EntranceGroupStateSnapshot,
+): GroupLockAction? {
+    if (!snapshot.deviceA.live ||
+        !snapshot.deviceB.live ||
+        snapshot.deviceA.state == LockState.UNKNOWN ||
+        snapshot.deviceB.state == LockState.UNKNOWN
+    ) {
+        return null
+    }
+
+    return if (
+        snapshot.deviceA.state == LockState.UNLOCKED &&
+        snapshot.deviceB.state == LockState.UNLOCKED
+    ) {
+        GroupLockAction.LOCK
+    } else {
+        GroupLockAction.UNLOCK
     }
 }
 
-fun resolveEntranceExplicitActionFromFreshState(snapshot: EntranceGroupStateSnapshot): GroupLockAction =
-    if (snapshot.deviceA.fresh && snapshot.deviceB.fresh && snapshot.deviceA.state == LockState.UNLOCKED && snapshot.deviceB.state == LockState.UNLOCKED) GroupLockAction.LOCK
-    else GroupLockAction.UNLOCK
+internal const val STATE_CONFIRMATION_UNAVAILABLE = "STATE_CONFIRMATION_UNAVAILABLE"
 
 const val LOW_BATTERY_THRESHOLD_PERCENT = 20
 const val LOW_BATTERY_RESET_PERCENT = 25
 
-internal fun shouldSendLowBatteryAlert(freshBatteryPercent: Int?, alreadyAlerted: Boolean): Boolean =
-    freshBatteryPercent != null && freshBatteryPercent <= LOW_BATTERY_THRESHOLD_PERCENT && !alreadyAlerted
+internal fun shouldSendLowBatteryAlert(
+    liveBatteryPercent: Int?,
+    alreadyAlerted: Boolean,
+): Boolean =
+    liveBatteryPercent != null &&
+        liveBatteryPercent <= LOW_BATTERY_THRESHOLD_PERCENT &&
+        !alreadyAlerted
 
-internal fun nextLowBatteryAlerted(freshBatteryPercent: Int?, alreadyAlerted: Boolean): Boolean = when {
-    freshBatteryPercent == null -> alreadyAlerted
-    freshBatteryPercent <= LOW_BATTERY_THRESHOLD_PERCENT -> true
-    freshBatteryPercent >= LOW_BATTERY_RESET_PERCENT -> false
+internal fun nextLowBatteryAlerted(
+    liveBatteryPercent: Int?,
+    alreadyAlerted: Boolean,
+): Boolean = when {
+    liveBatteryPercent == null -> alreadyAlerted
+    liveBatteryPercent <= LOW_BATTERY_THRESHOLD_PERCENT -> true
+    liveBatteryPercent >= LOW_BATTERY_RESET_PERCENT -> false
     else -> alreadyAlerted
 }
 
