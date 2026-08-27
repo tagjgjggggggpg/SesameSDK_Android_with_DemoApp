@@ -277,7 +277,7 @@ internal class CHSesame5Device(
             }
 
             SesameItemCode.mechSetting.value -> {
-                mechSetting = CHSesame5MechSettings(receivePayload.payload.sliceArray(0..5))
+                mechSetting = CHSesame5MechSettings(receivePayload.payload)
             }
 
             SesameItemCode.OPS_CONTROL.value -> {
