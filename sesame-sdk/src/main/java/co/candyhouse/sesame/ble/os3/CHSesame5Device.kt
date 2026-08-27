@@ -33,12 +33,14 @@ internal class CHSesame5Device(
 ) : CHSesameOS3LockBase(), CHSesame5, CHSesame5StrictLock {
     override var mechSetting: CHSesame5MechSettings? = null
     override var opsSetting: CHSesame5OpsSettings? = null
-    private fun diagId(): String = deviceId?.toString()?.takeLast(6) ?: "unknown"
+    private fun diagId(): String = p2DiagnosticDeviceId(deviceId?.toString())
     private fun diag(message: String) {
         if (!BuildConfig.DEBUG) return
         P2DiagnosticLog.append("P2StrictBLE", "dev=${diagId()} $message")
         try { L.d("P2StrictBLE", "dev=${diagId()} $message") } catch (_: RuntimeException) {}
     }
+    override fun isStrictBleTransportReady(): Boolean =
+        deviceStatus.value == CHDeviceLoginStatus.logined && mBluetoothGatt != null && mCharacteristic != null
     override fun goIOT() { L.d("hcia", "[ss5]goIOT:$deviceId"); CHIotManager.subscribeSesame2Shadow(this) { result -> result.onSuccess { resource -> resource.data.state.reported.wm2s?.let { wm2s -> isConnectedByWM2 = wm2s.map { it.value.hexStringToByteArray().first().toInt() }.contains(1) }; if (isConnectedByWM2) { resource.data.state.reported.mechst?.let { mechShadow -> val res: CHResult<CHEmpty> = { }; if (!isBleAvailable(res)) mechStatus = CHSesame5MechStatus(CHSesame2MechStatus(mechShadow.hexStringToByteArray()).ss5Adapter()) }; deviceShadowStatus = if (mechStatus!!.isInLockRange) CHDeviceStatus.Locked else CHDeviceStatus.Unlocked } else deviceShadowStatus = null } } }
     override fun configureLockPosition(lockTarget: Short, unlockTarget: Short, result: CHResult<CHEmpty>) { val cmd = SesameOS3Payload(SesameItemCode.mechSetting.value, lockTarget.toReverseBytes() + unlockTarget.toReverseBytes()); sendCommand(cmd, DeviceSegmentType.cipher) { res -> if (res.cmdResultCode == SesameResultCode.success.value) { mechSetting?.lockPosition = lockTarget; mechSetting?.unlockPosition = unlockTarget; result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty()))) } else result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt()))) } }
     override fun sendAdvProductTypeCommand(data: ByteArray, result: CHResult<CHEmpty>) { sendCommand(SesameOS3Payload(SesameItemCode.SS3_ITEM_CODE_SET_ADV_PRODUCT_TYPE.value, data), DeviceSegmentType.cipher) { res -> if (res.cmdResultCode == SesameResultCode.success.value) result.invoke(Result.success(CHResultState.CHResultStateBLE(CHEmpty()))) else result.invoke(Result.failure(NSError(res.cmdResultCode.toString(), "CBCentralManager", res.cmdResultCode.toInt()))) } }
