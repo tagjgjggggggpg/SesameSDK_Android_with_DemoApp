@@ -5,6 +5,7 @@ import co.candyhouse.sesame.open.CHDeviceManager
 import co.candyhouse.sesame.open.CHScanStatus
 import co.candyhouse.sesame.open.devices.CHSesame2
 import co.candyhouse.sesame.open.devices.CHSesame5
+import co.candyhouse.sesame.open.devices.CHSesame5StrictLock
 import co.candyhouse.sesame.open.devices.base.CHDeviceLoginStatus
 import co.candyhouse.sesame.open.devices.base.CHDeviceStatus
 import co.candyhouse.sesame.open.devices.base.CHDevices
@@ -74,7 +75,7 @@ class SesameGroupLockGateway : GroupLockGateway {
         val outcome = withTimeoutOrNull(COMMAND_TIMEOUT_MS) {
             awaitCommand { callback ->
                 when (device) {
-                    is CHSesame5 -> {
+                    is CHSesame5StrictLock -> {
                         if (action == GroupLockAction.LOCK) {
                             device.strictLock(historytag = historyTag, result = callback)
                         } else {
@@ -145,7 +146,7 @@ class SesameGroupLockGateway : GroupLockGateway {
                     connectRequested = true
                     try {
                         device.connect { }
-                    } catch (error: Throwable) {
+                    } catch (_: Throwable) {
                         return@withTimeoutOrNull false
                     }
                 }
