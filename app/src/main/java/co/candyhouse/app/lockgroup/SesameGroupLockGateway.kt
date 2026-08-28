@@ -5,6 +5,7 @@ import co.candyhouse.app.BuildConfig
 import co.candyhouse.sesame.open.CHBleManager
 import co.candyhouse.sesame.open.CHDeviceManager
 import co.candyhouse.sesame.open.CHScanStatus
+import co.candyhouse.sesame.open.devices.CHSesame5LiveBleSnapshot
 import co.candyhouse.sesame.open.devices.CHSesame5LiveLockState
 import co.candyhouse.sesame.open.devices.CHSesame5StrictLock
 import co.candyhouse.sesame.open.devices.base.CHDeviceLoginStatus
@@ -19,6 +20,8 @@ import co.utils.UserUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.TimeoutException
 import kotlin.coroutines.resume
@@ -44,6 +47,7 @@ internal interface SesameGroupLockRuntime {
 
 internal class ProductionSesameGroupLockRuntime : SesameGroupLockRuntime {
     private var scanInitialized = false; private var scanStartedByGateway = false; private var scanError: String? = null
+    private val scanMutex = Mutex()
     override suspend fun resolveDevice(deviceId: String): Result<CHDevices> {
         val started = System.currentTimeMillis(); val prefix = tracePrefix(deviceId); p2GroupLog("$prefix resolveDevice start")
         val result = withTimeoutOrNull(RESOLVE_DEVICE_TIMEOUT_MS) { suspendCancellableCoroutine<Result<CHDevices>> { c ->
@@ -54,13 +58,13 @@ internal class ProductionSesameGroupLockRuntime : SesameGroupLockRuntime {
         return result
     }
     override fun isStrictBleTransportReady(device: CHDevices) = device.deviceStatus.value == CHDeviceLoginStatus.logined && (device as? CHSesame5StrictLock)?.isStrictBleTransportReady() == true
-    override suspend fun ensureScan(): String? {
-        if (scanInitialized) return scanError
+    override suspend fun ensureScan(): String? = scanMutex.withLock {
+        if (scanInitialized) return@withLock scanError
         val wasEnabled = CHBleManager.mScanning == CHScanStatus.Enable
         val outcome = awaitTimedBleCallback(SCAN_START_TIMEOUT_MS) { awaitSimpleBleResult { CHBleManager.enableScan(false, it) } }
         scanInitialized = true
         when (outcome) { TimedBleCallbackResult.Success -> { scanStartedByGateway = !wasEnabled; scanError = null }; is TimedBleCallbackResult.Failure -> { scanStartedByGateway=false; scanError=outcome.error.message ?: outcome.error.javaClass.simpleName }; TimedBleCallbackResult.Timeout -> { scanStartedByGateway=false; scanError="BLE scan start timed out" } }
-        return scanError
+        scanError
     }
     override suspend fun waitForBleLogin(device: CHDevices): String? {
         if (device.deviceStatus.value == CHDeviceLoginStatus.logined) return null
@@ -84,18 +88,53 @@ internal class SesameGroupLockGateway(private val runtime: SesameGroupLockRuntim
     }
     override suspend fun getState(deviceId:String)=getDeviceSnapshot(deviceId).state
     override suspend fun getDeviceSnapshot(deviceId:String):EntranceDeviceSnapshot {
-        val device=runtime.resolveDevice(deviceId).getOrNull()?:return EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false)
-        if(!isSupportedGroupLockDevice(device))return EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false)
-        val live=(device as? CHSesame5StrictLock)?.liveBleSnapshot()?:return EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false)
-        return EntranceDeviceSnapshot(
-            state=when(live.lockState){CHSesame5LiveLockState.LOCKED->LockState.LOCKED;CHSesame5LiveLockState.UNLOCKED->LockState.UNLOCKED},
-            batteryPercent=live.batterySample?.percentage,
-            fresh=true,
-            stateObservedAtMillis=live.stateObservedAtMillis,
-            batterySampleObservedAtMillis=live.batterySample?.observedAtMillis,
-        )
+        val device=runtime.resolveDevice(deviceId).getOrNull()?:return unknownSnapshot()
+        if(!isSupportedGroupLockDevice(device))return unknownSnapshot()
+        val live=(device as? CHSesame5StrictLock)?.liveBleSnapshot()?:return unknownSnapshot()
+        return entranceSnapshot(live)
+    }
+    suspend fun refreshEntranceStateSnapshot(group:LockGroup):EntranceGroupStateSnapshot {
+        try {
+            val devices=group.deviceIds.take(2).map { id ->
+                try { refreshDeviceSnapshot(id) }
+                catch(c:CancellationException){throw c}
+                catch(_:Throwable){unknownSnapshot()}
+            }
+            val a=devices.getOrNull(0)?:unknownSnapshot()
+            val b=devices.getOrNull(1)?:unknownSnapshot()
+            val capturedAt=listOf(a,b).mapNotNull{it.stateObservedAtMillis.takeIf{_->it.fresh&&it.state!=LockState.UNKNOWN}}.maxOrNull()?:0L
+            return EntranceGroupStateSnapshot(a,b,capturedAt)
+        } finally { runtime.finishOperation() }
     }
     override suspend fun finishOperation(){runtime.finishOperation()}
+    private suspend fun refreshDeviceSnapshot(deviceId:String):EntranceDeviceSnapshot {
+        val device=runtime.resolveDevice(deviceId).getOrNull()?:return unknownSnapshot()
+        if(!isSupportedGroupLockDevice(device))return unknownSnapshot()
+        if(!runtime.isStrictBleTransportReady(device)){
+            runtime.ensureScan()?.let{return unknownSnapshot()}
+            runtime.waitForBleLogin(device)?.let{return unknownSnapshot()}
+        }
+        val live=awaitLiveSnapshot(device)?:return unknownSnapshot()
+        return entranceSnapshot(live)
+    }
+    private suspend fun awaitLiveSnapshot(device:CHDevices):CHSesame5LiveBleSnapshot? {
+        (device as? CHSesame5StrictLock)?.liveBleSnapshot()?.let{return it}
+        return withTimeoutOrNull(stateObserveTimeoutMs){
+            while(true){
+                (device as? CHSesame5StrictLock)?.liveBleSnapshot()?.let{return@withTimeoutOrNull it}
+                delay(statePollMs)
+            }
+            null
+        }
+    }
+    private fun entranceSnapshot(live:CHSesame5LiveBleSnapshot)=EntranceDeviceSnapshot(
+        state=when(live.lockState){CHSesame5LiveLockState.LOCKED->LockState.LOCKED;CHSesame5LiveLockState.UNLOCKED->LockState.UNLOCKED},
+        batteryPercent=live.batterySample?.percentage,
+        fresh=true,
+        stateObservedAtMillis=live.stateObservedAtMillis,
+        batterySampleObservedAtMillis=live.batterySample?.observedAtMillis,
+    )
+    private fun unknownSnapshot()=EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false)
     private suspend fun awaitObservedState(device:CHDevices,target:LockState):LockState{withTimeoutOrNull(stateObserveTimeoutMs){while(liveState(device)!=target)delay(statePollMs)};return liveState(device)}
     private fun liveState(device:CHDevices):LockState=when((device as? CHSesame5StrictLock)?.liveBleSnapshot()?.lockState){CHSesame5LiveLockState.LOCKED->LockState.LOCKED;CHSesame5LiveLockState.UNLOCKED->LockState.UNLOCKED;null->LockState.UNKNOWN}
     private suspend fun awaitCommand(block:(CHResult<CHEmpty>)->Unit):CommandOutcome=suspendCancellableCoroutine{c->try{block(callback@{r->if(!c.isActive)return@callback;r.fold(onSuccess={c.resume(CommandOutcome.Success)},onFailure={c.resume(CommandOutcome.Failure(it))})})}catch(e:CancellationException){c.cancel(e)}catch(e:Throwable){if(c.isActive)c.resume(CommandOutcome.Failure(e))}}
