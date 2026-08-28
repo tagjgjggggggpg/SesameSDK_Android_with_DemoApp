@@ -36,17 +36,32 @@ jobs:
             APKANALYZER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name apkanalyzer | head -n 1)"
           fi
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          test -x "$APKANALYZER"
-          test -x "$APKSIGNER"
+          assert_eq() {
+            local name="$1" actual="$2" expected="$3"
+            if [ "$actual" != "$expected" ]; then
+              echo "ASSERTION_FAILED=$name"
+              exit 1
+            fi
+            echo "ASSERTION_PASSED=$name"
+          }
+          if [ ! -x "$APKANALYZER" ]; then echo "ASSERTION_FAILED=apkanalyzer_available"; exit 1; fi
+          if [ ! -x "$APKSIGNER" ]; then echo "ASSERTION_FAILED=apksigner_available"; exit 1; fi
           PHONE_ID="$($APKANALYZER manifest application-id "$PHONE_APK")"
           WEAR_ID="$($APKANALYZER manifest application-id "$WEAR_APK")"
-          EXPECTED_ID="co.candyhouse.sesame2.phase2debug"
-          test "$PHONE_ID" = "$EXPECTED_ID"
-          test "$WEAR_ID" = "$EXPECTED_ID"
           PHONE_CERT="$($APKSIGNER verify --print-certs "$PHONE_APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}')"
           WEAR_CERT="$($APKSIGNER verify --print-certs "$WEAR_APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}')"
-          test -n "$PHONE_CERT"
-          test "$PHONE_CERT" = "$WEAR_CERT"
+          EXPECTED_ID="co.candyhouse.sesame2.phase2debug"
+          echo "PHONE_ID=$PHONE_ID"
+          echo "WEAR_ID=$WEAR_ID"
+          echo "PHONE_SIGNER_SHA256=$PHONE_CERT"
+          echo "WEAR_SIGNER_SHA256=$WEAR_CERT"
+          assert_eq phone_application_id "$PHONE_ID" "$EXPECTED_ID"
+          assert_eq wear_application_id "$WEAR_ID" "$EXPECTED_ID"
+          if [ -z "$PHONE_CERT" ]; then echo "ASSERTION_FAILED=phone_signer_present"; exit 1; fi
+          echo "ASSERTION_PASSED=phone_signer_present"
+          if [ -z "$WEAR_CERT" ]; then echo "ASSERTION_FAILED=wear_signer_present"; exit 1; fi
+          echo "ASSERTION_PASSED=wear_signer_present"
+          assert_eq phone_wear_signer_match "$PHONE_CERT" "$WEAR_CERT"
           mkdir -p phase3-artifacts
           cp "$PHONE_APK" phase3-artifacts/phone-debug.apk
           cp "$WEAR_APK" phase3-artifacts/wear-debug.apk
@@ -54,7 +69,8 @@ jobs:
             echo "head_sha=$GITHUB_SHA"
             echo "phone_application_id=$PHONE_ID"
             echo "wear_application_id=$WEAR_ID"
-            echo "signer_certificate_sha256=$PHONE_CERT"
+            echo "phone_signer_certificate_sha256=$PHONE_CERT"
+            echo "wear_signer_certificate_sha256=$WEAR_CERT"
             sha256sum phase3-artifacts/phone-debug.apk
             sha256sum phase3-artifacts/wear-debug.apk
           } | tee phase3-artifacts/verification.txt
