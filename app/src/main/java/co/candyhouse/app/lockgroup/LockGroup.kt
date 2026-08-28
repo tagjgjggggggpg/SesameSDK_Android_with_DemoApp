@@ -25,12 +25,6 @@ data class EntranceGroupStateSnapshot(
     val deviceB: EntranceDeviceSnapshot,
     val capturedAt: Long,
 ) {
-    constructor(deviceA: LockState, deviceB: LockState) : this(
-        EntranceDeviceSnapshot(deviceA, fresh = deviceA != LockState.UNKNOWN),
-        EntranceDeviceSnapshot(deviceB, fresh = deviceB != LockState.UNKNOWN),
-        0L,
-    )
-
     val groupState: GroupState get() = aggregateGroupState(listOf(deviceA.state, deviceB.state))
     val confirmation: SnapshotConfirmation get() = when (listOf(deviceA, deviceB).count { it.fresh && it.state != LockState.UNKNOWN }) {
         2 -> SnapshotConfirmation.FULL
