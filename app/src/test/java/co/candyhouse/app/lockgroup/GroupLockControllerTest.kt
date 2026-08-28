@@ -5,6 +5,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -253,6 +254,22 @@ class GroupLockControllerTest {
     }
 
     @Test
+    fun ordinaryStateGateway_isExplicitlyNonFreshForEntranceSnapshot() = runBlocking {
+        val gateway = FakeGateway(
+            mutableMapOf(
+                "device-a" to LockState.LOCKED,
+                "device-b" to LockState.UNLOCKED,
+            )
+        )
+
+        val snapshot = controller(gateway).getEntranceStateSnapshot(twoDeviceGroup)
+
+        assertFalse(snapshot.deviceA.fresh)
+        assertFalse(snapshot.deviceB.fresh)
+        assertEquals(SnapshotConfirmation.NONE, snapshot.confirmation)
+    }
+
+    @Test
     fun aggregateState_isConservativeWhenUnknownIsPresent() {
         assertEquals(GroupState.UNKNOWN, aggregateGroupState(emptyList()))
         assertEquals(GroupState.LOCKED, aggregateGroupState(listOf(LockState.LOCKED, LockState.LOCKED)))
@@ -311,6 +328,9 @@ class GroupLockControllerTest {
         }
 
         override suspend fun getState(deviceId: String): LockState = states[deviceId] ?: LockState.UNKNOWN
+
+        override suspend fun getDeviceSnapshot(deviceId: String): EntranceDeviceSnapshot =
+            EntranceDeviceSnapshot(states[deviceId] ?: LockState.UNKNOWN, fresh = false)
 
         override suspend fun finishOperation() {
             finishCalls += 1
