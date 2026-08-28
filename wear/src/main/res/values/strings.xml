@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="entrance_tile_label">玄関</string>
+    <string name="entrance_tile_description">玄関のSESAMEを操作</string>
+</resources>

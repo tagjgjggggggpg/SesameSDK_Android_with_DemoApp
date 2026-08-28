@@ -30,12 +30,17 @@
 
         <service
             android:name=".EntranceTileService"
+            android:description="@string/entrance_tile_description"
             android:exported="true"
-            android:label="玄関"
+            android:icon="@drawable/phase3_lock_locked"
+            android:label="@string/entrance_tile_label"
             android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
             <intent-filter>
                 <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
             </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/phase3_lock_locked" />
         </service>
     </application>
 </manifest>

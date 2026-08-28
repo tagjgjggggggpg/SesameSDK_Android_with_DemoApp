@@ -62,6 +62,49 @@ jobs:
           chmod +x gradlew
           ./gradlew :sesame-sdk:testDebugUnitTest :app:testDebugUnitTest :wear:testDebugUnitTest :sesame-sdk:assembleDebug :app:assembleDebug :wear:assembleDebug --stacktrace
 
+      - name: Verify Wear Tile provider merged manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          WEAR_MANIFEST="$(find wear/build/intermediates -type f -name AndroidManifest.xml -path '*merged_manifest*debug*' | head -n 1)"
+          if [ -z "$WEAR_MANIFEST" ] || [ ! -f "$WEAR_MANIFEST" ]; then
+            echo "::error::Merged Wear debug manifest not found"
+            exit 1
+          fi
+          python3 - "$WEAR_MANIFEST" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          android = "{http://schemas.android.com/apk/res/android}"
+          manifest = ET.parse(sys.argv[1]).getroot()
+          application = manifest.find("application")
+          if application is None:
+              raise SystemExit("ASSERTION_FAILED=wear_application_manifest")
+          services = application.findall("service")
+          service = next((s for s in services if (s.get(android + "name") or "").endswith(".EntranceTileService")), None)
+          if service is None:
+              raise SystemExit("ASSERTION_FAILED=entrance_tile_service_present")
+          print("ASSERTION_PASSED=entrance_tile_service_present")
+          if service.get(android + "permission") != "com.google.android.wearable.permission.BIND_TILE_PROVIDER":
+              raise SystemExit("ASSERTION_FAILED=tile_bind_permission")
+          print("ASSERTION_PASSED=tile_bind_permission")
+          actions = [a.get(android + "name") for f in service.findall("intent-filter") for a in f.findall("action")]
+          if "androidx.wear.tiles.action.BIND_TILE_PROVIDER" not in actions:
+              raise SystemExit("ASSERTION_FAILED=tile_bind_action")
+          print("ASSERTION_PASSED=tile_bind_action")
+          if not service.get(android + "icon"):
+              raise SystemExit("ASSERTION_FAILED=tile_icon")
+          print("ASSERTION_PASSED=tile_icon")
+          if not service.get(android + "description"):
+              raise SystemExit("ASSERTION_FAILED=tile_description")
+          print("ASSERTION_PASSED=tile_description")
+          preview = next((m for m in service.findall("meta-data") if m.get(android + "name") == "androidx.wear.tiles.PREVIEW"), None)
+          if preview is None or not preview.get(android + "resource"):
+              raise SystemExit("ASSERTION_FAILED=tile_preview")
+          print("ASSERTION_PASSED=tile_preview")
+          print(f"WEAR_MERGED_MANIFEST={sys.argv[1]}")
+          PY
+
       - name: Verify application IDs and Phase 3 signer certificate
         shell: bash
         run: |
