@@ -156,6 +156,7 @@ dependencies {
 
     implementation libs.play.services.location
     implementation libs.play.services.maps
+    implementation 'com.google.android.gms:play-services-wearable:20.0.1'
 
     implementation platform(libs.firebase.bom)
     implementation libs.firebase.config.ktx

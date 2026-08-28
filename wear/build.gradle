@@ -1,0 +1,45 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace 'co.candyhouse.wear.phase3'
+    compileSdk = rootProject.ext.compileSdkVersion
+
+    defaultConfig {
+        applicationId 'co.candyhouse.sesame2'
+        minSdk 30
+        targetSdk rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName '1.0-phase3'
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.phase2debug'
+            versionNameSuffix '-debug'
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.gms:play-services-wearable:20.0.1'
+    implementation 'androidx.wear:wear:1.4.0'
+    implementation 'androidx.wear.tiles:tiles:1.6.2'
+    implementation 'androidx.wear.protolayout:protolayout:1.4.2'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    testImplementation 'junit:junit:4.13.2'
+}
