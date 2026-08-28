@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicLong
 interface GroupLockGateway {
     suspend fun operate(deviceId: String, action: GroupLockAction): DeviceOperationResult
     suspend fun getState(deviceId: String): LockState
-    suspend fun getDeviceSnapshot(deviceId: String): EntranceDeviceSnapshot = EntranceDeviceSnapshot(getState(deviceId), fresh = true)
+    suspend fun getDeviceSnapshot(deviceId: String): EntranceDeviceSnapshot
     suspend fun finishOperation() {}
 }
 
