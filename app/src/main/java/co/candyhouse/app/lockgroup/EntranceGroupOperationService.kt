@@ -33,10 +33,8 @@ class EntranceGroupOperationService:Service(){
         scope.launch{
             val group=SharedPreferencesLockGroupStore().getGroup(SharedPreferencesLockGroupStore.DEFAULT_GROUP_ID)?:SharedPreferencesLockGroupStore.DEFAULT_GROUP
             val controller=GroupLockController(SesameGroupLockGateway())
-            val result:GroupOperationResult?
-            val initial:EntranceGroupStateSnapshot
-            try{val pair=resolveAndExecuteEntranceOneButton(controller,group);initial=pair.first;result=pair.second}
-            catch(c:CancellationException){throw c}catch(_:Throwable){initial=EntranceGroupStateSnapshot(EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),0L);result=null}
+            val (initial,result)=try{resolveAndExecuteEntranceOneButton(controller,group)}
+            catch(c:CancellationException){throw c}catch(_:Throwable){EntranceGroupStateSnapshot(EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),0L) to null}
             EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService,initial,if(result==null)"状態確認不能" else "状態を確認しました");processFreshBatteryAlerts(group,initial)
             val post=if(result==null)initial else runCatching{controller.getEntranceStateSnapshot(group)}.getOrElse{EntranceGroupStateSnapshot(EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),0L)}
             val message=resultText(result);EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService,post,message);processFreshBatteryAlerts(group,post);refreshTile();Toast.makeText(this@EntranceGroupOperationService,message,Toast.LENGTH_LONG).show();stopForeground(STOP_FOREGROUND_REMOVE);if(result!=null&&result.status!=GroupOperationStatus.SUCCESS)notifyFailure(message);stopSelf(startId)
