@@ -35,7 +35,7 @@ class EntranceTileService : TileService() {
             "MIXED" -> "混在"
             else -> "不明"
         }
-        val layout = LayoutElementBuilders.Column.Builder()
+        val root = LayoutElementBuilders.Column.Builder()
             .addContent(LayoutElementBuilders.Text.Builder().setText("玄関").build())
             .addContent(LayoutElementBuilders.Text.Builder().setText(stateText).build())
             .addContent(
@@ -45,6 +45,7 @@ class EntranceTileService : TileService() {
                     .build()
             )
             .build()
+        val layout = LayoutElementBuilders.Layout.Builder().setRoot(root).build()
         val timeline = TimelineBuilders.Timeline.Builder()
             .addTimelineEntry(TimelineBuilders.TimelineEntry.Builder().setLayout(layout).build())
             .build()
