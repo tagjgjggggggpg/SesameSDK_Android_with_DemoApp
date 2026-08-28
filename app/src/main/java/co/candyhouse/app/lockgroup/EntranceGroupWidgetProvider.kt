@@ -29,12 +29,22 @@ class EntranceGroupWidgetProvider : AppWidgetProvider() {
                 .putString(KEY_B, snapshot.deviceB.state.name)
             snapshot.deviceA.batteryPercent?.let { edit.putInt(KEY_BATTERY_A, it) }
             snapshot.deviceB.batteryPercent?.let { edit.putInt(KEY_BATTERY_B, it) }
-            if (snapshot.confirmation != SnapshotConfirmation.NONE && snapshot.capturedAt > 0L) edit.putLong(KEY_CONFIRMED_AT, snapshot.capturedAt)
+            confirmationTimeToPersist(snapshot)?.let { edit.putLong(KEY_CONFIRMED_AT, it) }
             edit.apply()
             val manager = AppWidgetManager.getInstance(context)
             val component = ComponentName(context, EntranceGroupWidgetProvider::class.java)
             manager.getAppWidgetIds(component).forEach { updateOne(context, manager, it, snapshot, status) }
         }
+
+        fun showStatus(context:Context,status:String){
+            val snapshot=cachedSnapshot(context)
+            val manager=AppWidgetManager.getInstance(context)
+            val component=ComponentName(context,EntranceGroupWidgetProvider::class.java)
+            manager.getAppWidgetIds(component).forEach{updateOne(context,manager,it,snapshot,status)}
+        }
+
+        internal fun confirmationTimeToPersist(snapshot:EntranceGroupStateSnapshot):Long?=
+            snapshot.capturedAt.takeIf{snapshot.confirmation!=SnapshotConfirmation.NONE&&it>0L}
 
         internal fun cachedSnapshot(context: Context): EntranceGroupStateSnapshot {
             val p=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
@@ -59,10 +69,15 @@ class EntranceGroupWidgetProvider : AppWidgetProvider() {
             val confirm=when{time==null->"確認できません";s.confirmation==SnapshotConfirmation.FULL->"確認 $time";s.confirmation==SnapshotConfirmation.PARTIAL->"一部確認 $time";else->"最終確認 $time"}
             v.setTextViewText(R.id.entrance_widget_confirmed,confirm)
             val battery=batteryWarningLabel(s);v.setViewVisibility(R.id.entrance_widget_battery,if(battery==null)View.GONE else View.VISIBLE);v.setTextViewText(R.id.entrance_widget_battery,battery?:"")
-            v.setTextViewText(R.id.entrance_widget_status,status?:"");v.setOnClickPendingIntent(R.id.entrance_widget_action,operationPendingIntent(context));manager.updateAppWidget(id,v)
+            v.setTextViewText(R.id.entrance_widget_status,status?:"")
+            v.setOnClickPendingIntent(R.id.entrance_widget_action,operationPendingIntent(context))
+            v.setOnClickPendingIntent(R.id.entrance_widget_refresh,refreshPendingIntent(context))
+            manager.updateAppWidget(id,v)
         }
         private fun stateLabel(s:LockState)=when(s){LockState.LOCKED->"施錠";LockState.UNLOCKED->"解錠";LockState.UNKNOWN->"不明"}
-        private fun operationPendingIntent(context:Context):PendingIntent{val i=Intent(context,EntranceGroupOperationService::class.java).setAction(EntranceGroupCommand.ONE_BUTTON);val f=PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE;return if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)PendingIntent.getForegroundService(context,41031,i,f)else PendingIntent.getService(context,41031,i,f)}
+        private fun operationPendingIntent(context:Context)=servicePendingIntent(context,41031,EntranceGroupCommand.ONE_BUTTON)
+        private fun refreshPendingIntent(context:Context)=servicePendingIntent(context,41032,EntranceGroupCommand.REFRESH_STATE)
+        private fun servicePendingIntent(context:Context,requestCode:Int,action:String):PendingIntent{val i=Intent(context,EntranceGroupOperationService::class.java).setAction(action);val f=PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE;return if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)PendingIntent.getForegroundService(context,requestCode,i,f)else PendingIntent.getService(context,requestCode,i,f)}
         private const val PREFS="entrance_group_widget";private const val KEY_A="last_device_a_state";private const val KEY_B="last_device_b_state";private const val KEY_BATTERY_A="last_battery_a";private const val KEY_BATTERY_B="last_battery_b";private const val KEY_CONFIRMED_AT="last_confirmed_at"
     }
 }
