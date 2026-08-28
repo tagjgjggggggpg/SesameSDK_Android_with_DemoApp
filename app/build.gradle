@@ -5,11 +5,34 @@ plugins {
     alias(libs.plugins.firebase.crashlytics.gradle)
 }
 
+def phase3DebugKeystorePath = System.getenv("PHASE3_DEBUG_KEYSTORE_PATH")
+def phase3DebugStorePassword = System.getenv("PHASE3_DEBUG_STORE_PASSWORD")
+def phase3DebugKeyAlias = System.getenv("PHASE3_DEBUG_KEY_ALIAS")
+def phase3DebugKeyPassword = System.getenv("PHASE3_DEBUG_KEY_PASSWORD")
+def phase3DebugSigningConfigured = [
+        phase3DebugKeystorePath,
+        phase3DebugStorePassword,
+        phase3DebugKeyAlias,
+        phase3DebugKeyPassword,
+].every { it != null && !it.isEmpty() }
+def phase3DebugRequested = gradle.startParameter.taskNames.any { it.toLowerCase().contains("debug") }
+if (phase3DebugRequested && !phase3DebugSigningConfigured) {
+    throw new GradleException("Phase 3 debug signing environment is incomplete")
+}
+
 android {
     namespace 'co.candyhouse.app'
     compileSdk = rootProject.ext.compileSdkVersion
 
     signingConfigs {
+        phase3Debug {
+            if (phase3DebugSigningConfigured) {
+                storeFile file(phase3DebugKeystorePath)
+                storePassword phase3DebugStorePassword
+                keyAlias phase3DebugKeyAlias
+                keyPassword phase3DebugKeyPassword
+            }
+        }
         release {
             def passStore = System.getenv("storePassword")
             def passKey = System.getenv("keyPassword")
@@ -56,6 +79,7 @@ android {
         debug {
             applicationIdSuffix '.phase2debug'
             versionNameSuffix '-phase2-debug'
+            signingConfig signingConfigs.phase3Debug
             minifyEnabled false
             firebaseCrashlytics {
                 mappingFileUploadEnabled = false
