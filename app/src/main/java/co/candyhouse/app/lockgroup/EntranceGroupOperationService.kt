@@ -20,26 +20,42 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
-internal object EntranceGroupCommand { const val ONE_BUTTON="co.candyhouse.app.lockgroup.ONE_BUTTON"; fun isSupported(a:String?)=a==ONE_BUTTON }
+internal object EntranceGroupCommand {
+    const val ONE_BUTTON="co.candyhouse.app.lockgroup.ONE_BUTTON"
+    const val REFRESH_STATE="co.candyhouse.app.lockgroup.REFRESH_STATE"
+    fun isSupported(a:String?)=a==ONE_BUTTON||a==REFRESH_STATE
+}
 internal suspend fun executeEntranceGroupAction(c:GroupLockController,g:LockGroup,a:GroupLockAction)=when(a){GroupLockAction.LOCK->c.lockGroup(g);GroupLockAction.UNLOCK->c.unlockGroup(g)}
 internal suspend fun resolveAndExecuteEntranceOneButton(c:GroupLockController,g:LockGroup):Pair<EntranceGroupStateSnapshot,GroupOperationResult?>{val fresh=c.getEntranceStateSnapshot(g);val action=resolveEntranceExplicitActionFromFreshState(fresh)?:return fresh to null;return fresh to executeEntranceGroupAction(c,g,action)}
+internal fun refreshStatus(snapshot:EntranceGroupStateSnapshot)=when(snapshot.confirmation){SnapshotConfirmation.FULL->"状態を更新しました";SnapshotConfirmation.PARTIAL->"一部のみ確認";SnapshotConfirmation.NONE->"状態を確認できません"}
 
 class EntranceGroupOperationService:Service(){
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     override fun onCreate(){super.onCreate();createNotificationChannel()}
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int{
-        if(!EntranceGroupCommand.isSupported(intent?.action)){stopSelf(startId);return START_NOT_STICKY}
+        val command=intent?.action
+        if(!EntranceGroupCommand.isSupported(command)){stopSelf(startId);return START_NOT_STICKY}
         startForeground(FOREGROUND_NOTIFICATION_ID,notification("玄関の状態を確認しています"))
+        if(command==EntranceGroupCommand.REFRESH_STATE)EntranceGroupWidgetProvider.showStatus(this,"確認中…")
         scope.launch{
             val group=SharedPreferencesLockGroupStore().getGroup(SharedPreferencesLockGroupStore.DEFAULT_GROUP_ID)?:SharedPreferencesLockGroupStore.DEFAULT_GROUP
+            if(command==EntranceGroupCommand.REFRESH_STATE){
+                val snapshot=try{SesameGroupLockGateway().refreshEntranceStateSnapshot(group)}catch(c:CancellationException){throw c}catch(_:Throwable){unknownSnapshot()}
+                val message=refreshStatus(snapshot)
+                EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService,snapshot,message)
+                processFreshBatteryAlerts(group,snapshot)
+                refreshTile();Toast.makeText(this@EntranceGroupOperationService,message,Toast.LENGTH_SHORT).show();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf(startId)
+                return@launch
+            }
             val controller=GroupLockController(SesameGroupLockGateway())
             val (initial,result)=try{resolveAndExecuteEntranceOneButton(controller,group)}
-            catch(c:CancellationException){throw c}catch(_:Throwable){EntranceGroupStateSnapshot(EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),0L) to null}
+            catch(c:CancellationException){throw c}catch(_:Throwable){unknownSnapshot() to null}
             EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService,initial,if(result==null)"状態確認不能" else "状態を確認しました");processFreshBatteryAlerts(group,initial)
-            val post=if(result==null)initial else runCatching{controller.getEntranceStateSnapshot(group)}.getOrElse{EntranceGroupStateSnapshot(EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),0L)}
+            val post=if(result==null)initial else runCatching{controller.getEntranceStateSnapshot(group)}.getOrElse{unknownSnapshot()}
             val message=resultText(result);EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService,post,message);processFreshBatteryAlerts(group,post);refreshTile();Toast.makeText(this@EntranceGroupOperationService,message,Toast.LENGTH_LONG).show();stopForeground(STOP_FOREGROUND_REMOVE);if(result!=null&&result.status!=GroupOperationStatus.SUCCESS)notifyFailure(message);stopSelf(startId)
         };return START_NOT_STICKY
     }
+    private fun unknownSnapshot()=EntranceGroupStateSnapshot(EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),EntranceDeviceSnapshot(LockState.UNKNOWN,fresh=false),0L)
     private fun processFreshBatteryAlerts(group:LockGroup,s:EntranceGroupStateSnapshot){
         val prefs=getSharedPreferences(BATTERY_PREFS,Context.MODE_PRIVATE)
         listOf(s.deviceA,s.deviceB).forEachIndexed{i,d->
