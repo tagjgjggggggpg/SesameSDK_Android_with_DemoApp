@@ -1,7 +1,9 @@
 package co.candyhouse.app.lockgroup
 
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -28,8 +30,6 @@ internal object GroupOperationTrace {
 
 class GroupLockController(
     private val gateway: GroupLockGateway,
-    private val interDeviceDelayMs: Long = 500L,
-    private val delayBetweenDevices: suspend (Long) -> Unit = { delay(it) },
 ) {
     suspend fun lockGroup(group: LockGroup): GroupOperationResult = operate(group, GroupLockAction.LOCK)
     suspend fun unlockGroup(group: LockGroup): GroupOperationResult = operate(group, GroupLockAction.UNLOCK)
@@ -52,12 +52,14 @@ class GroupLockController(
         val operationId = GroupOperationTrace.begin()
         try {
             if (group.deviceIds.isEmpty()) return GroupOperationResult(group.id, action, GroupOperationStatus.FAILURE, emptyList(), "The group has no devices")
-            val results = mutableListOf<DeviceOperationResult>()
-            group.deviceIds.forEachIndexed { index, deviceId ->
-                results += try { gateway.operate(deviceId, action) }
-                catch (cancellation: CancellationException) { throw cancellation }
-                catch (error: Throwable) { DeviceOperationResult(deviceId, false, error.message ?: error::class.java.simpleName) }
-                if (index < group.deviceIds.lastIndex) delayBetweenDevices(interDeviceDelayMs)
+            val results = coroutineScope {
+                group.deviceIds.map { deviceId ->
+                    async {
+                        try { gateway.operate(deviceId, action) }
+                        catch (cancellation: CancellationException) { throw cancellation }
+                        catch (error: Throwable) { DeviceOperationResult(deviceId, false, error.message ?: error::class.java.simpleName) }
+                    }
+                }.awaitAll()
             }
             val successCount = results.count { it.success }
             val status = when { successCount == results.size -> GroupOperationStatus.SUCCESS; successCount == 0 -> GroupOperationStatus.FAILURE; else -> GroupOperationStatus.PARTIAL }
