@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -28,15 +29,11 @@ class GroupLockControllerTest {
 
         assertEquals(GroupOperationStatus.SUCCESS, lockResult.status)
         assertEquals(GroupOperationStatus.SUCCESS, unlockResult.status)
-        assertEquals(
-            listOf(
-                "device-a" to GroupLockAction.LOCK,
-                "device-b" to GroupLockAction.LOCK,
-                "device-a" to GroupLockAction.UNLOCK,
-                "device-b" to GroupLockAction.UNLOCK,
-            ),
-            gateway.operationCalls,
-        )
+        assertEquals(4, gateway.operationCalls.size)
+        assertEquals(2, gateway.operationCalls.count { it.second == GroupLockAction.LOCK })
+        assertEquals(2, gateway.operationCalls.count { it.second == GroupLockAction.UNLOCK })
+        assertEquals(setOf("device-a", "device-b"), gateway.operationCalls.take(2).map { it.first }.toSet())
+        assertEquals(setOf("device-a", "device-b"), gateway.operationCalls.drop(2).map { it.first }.toSet())
     }
 
     @Test
@@ -51,13 +48,8 @@ class GroupLockControllerTest {
         val result = controller(gateway).lockGroup(twoDeviceGroup)
 
         assertEquals(GroupOperationStatus.SUCCESS, result.status)
-        assertEquals(
-            listOf(
-                "device-a" to GroupLockAction.LOCK,
-                "device-b" to GroupLockAction.LOCK,
-            ),
-            gateway.operationCalls,
-        )
+        assertEquals(setOf("device-a", "device-b"), gateway.operationCalls.map { it.first }.toSet())
+        assertTrue(gateway.operationCalls.all { it.second == GroupLockAction.LOCK })
     }
 
     @Test
@@ -72,13 +64,20 @@ class GroupLockControllerTest {
         val result = controller(gateway).unlockGroup(twoDeviceGroup)
 
         assertEquals(GroupOperationStatus.SUCCESS, result.status)
-        assertEquals(
-            listOf(
-                "device-a" to GroupLockAction.UNLOCK,
-                "device-b" to GroupLockAction.UNLOCK,
-            ),
-            gateway.operationCalls,
-        )
+        assertEquals(setOf("device-a", "device-b"), gateway.operationCalls.map { it.first }.toSet())
+        assertTrue(gateway.operationCalls.all { it.second == GroupLockAction.UNLOCK })
+    }
+
+    @Test
+    fun twoDevices_startInParallelWithoutSequentialDelay() = runBlocking {
+        val gateway = ParallelStartGateway(expectedStarts = 2)
+        val operation = async { controller(gateway).lockGroup(twoDeviceGroup) }
+
+        withTimeout(1_000L) { gateway.allStarted.await() }
+        assertEquals(setOf("device-a", "device-b"), gateway.started.toSet())
+
+        gateway.release.complete(Unit)
+        assertEquals(GroupOperationStatus.SUCCESS, operation.await().status)
     }
 
     @Test
@@ -94,73 +93,49 @@ class GroupLockControllerTest {
     }
 
     @Test
-    fun threeDevices_preservesUuidOrder_andUses500msBetweenDevices() = runBlocking {
-        val gateway = FakeGateway(
-            mutableMapOf(
-                "device-a" to LockState.UNLOCKED,
-                "device-b" to LockState.UNLOCKED,
-                "device-c" to LockState.UNLOCKED,
-            )
-        )
-        val delays = mutableListOf<Long>()
-        val controller = GroupLockController(
-            gateway = gateway,
-            interDeviceDelayMs = 500L,
-            delayBetweenDevices = { delays += it },
-        )
+    fun firstDeviceFailure_doesNotCancelSecondDevice() = runBlocking {
+        val gateway = FailureAndBlockingPeerGateway(failingDevice = "device-a")
+        val operation = async { controller(gateway).lockGroup(twoDeviceGroup) }
 
-        val result = controller.lockGroup(threeDeviceGroup)
+        withTimeout(1_000L) { gateway.peerStarted.await() }
+        gateway.releasePeer.complete(Unit)
+        val result = operation.await()
 
-        assertEquals(GroupOperationStatus.SUCCESS, result.status)
-        assertEquals(
-            listOf("device-a", "device-b", "device-c"),
-            gateway.operationCalls.map { it.first },
-        )
-        assertEquals(listOf(500L, 500L), delays)
-    }
-
-    @Test
-    fun firstDeviceFailure_doesNotStopRemainingDevices() = runBlocking {
-        val gateway = FakeGateway(
-            initialStates = mutableMapOf(
-                "device-a" to LockState.UNLOCKED,
-                "device-b" to LockState.UNLOCKED,
-                "device-c" to LockState.UNLOCKED,
-            ),
-            failures = mapOf("device-a" to "BLE disconnected"),
-        )
-
-        val result = controller(gateway).lockGroup(threeDeviceGroup)
-
+        assertTrue(gateway.peerCompleted)
         assertEquals(GroupOperationStatus.PARTIAL, result.status)
-        assertEquals(listOf("device-a", "device-b", "device-c"), gateway.operationCalls.map { it.first })
-        assertEquals("BLE disconnected", result.deviceResults[0].error)
-        assertTrue(result.deviceResults[1].success)
-        assertTrue(result.deviceResults[2].success)
+        assertEquals(1, result.deviceResults.count { it.success })
     }
 
     @Test
-    fun middleDeviceFailure_doesNotStopRemainingDevices() = runBlocking {
+    fun secondDeviceFailure_doesNotCancelFirstDevice() = runBlocking {
+        val gateway = FailureAndBlockingPeerGateway(failingDevice = "device-b")
+        val operation = async { controller(gateway).unlockGroup(twoDeviceGroup) }
+
+        withTimeout(1_000L) { gateway.peerStarted.await() }
+        gateway.releasePeer.complete(Unit)
+        val result = operation.await()
+
+        assertTrue(gateway.peerCompleted)
+        assertEquals(GroupOperationStatus.PARTIAL, result.status)
+        assertEquals(1, result.deviceResults.count { it.success })
+    }
+
+    @Test
+    fun bothDeviceFailures_returnFailure() = runBlocking {
         val gateway = FakeGateway(
-            initialStates = mutableMapOf(
-                "device-a" to LockState.UNLOCKED,
-                "device-b" to LockState.UNLOCKED,
-                "device-c" to LockState.UNLOCKED,
-            ),
-            failures = mapOf("device-b" to "BLE disconnected"),
+            initialStates = mutableMapOf("device-a" to LockState.UNLOCKED, "device-b" to LockState.UNLOCKED),
+            failures = mapOf("device-a" to "A failed", "device-b" to "B failed"),
         )
 
-        val result = controller(gateway).lockGroup(threeDeviceGroup)
+        val result = controller(gateway).lockGroup(twoDeviceGroup)
 
-        assertEquals(GroupOperationStatus.PARTIAL, result.status)
-        assertEquals(listOf("device-a", "device-b", "device-c"), gateway.operationCalls.map { it.first })
-        assertTrue(result.deviceResults[0].success)
-        assertEquals("BLE disconnected", result.deviceResults[1].error)
-        assertTrue(result.deviceResults[2].success)
+        assertEquals(GroupOperationStatus.FAILURE, result.status)
+        assertEquals(0, result.deviceResults.count { it.success })
+        assertEquals(2, gateway.operationCalls.size)
     }
 
     @Test
-    fun gatewayException_isPerDeviceFailureAndRemainingDevicesContinue() = runBlocking {
+    fun threeDeviceGatewayException_isPerDeviceFailureAndOtherDevicesComplete() = runBlocking {
         val gateway = FakeGateway(
             initialStates = mutableMapOf(
                 "device-a" to LockState.UNLOCKED,
@@ -173,9 +148,10 @@ class GroupLockControllerTest {
         val result = controller(gateway).lockGroup(threeDeviceGroup)
 
         assertEquals(GroupOperationStatus.PARTIAL, result.status)
-        assertEquals(listOf("device-a", "device-b", "device-c"), gateway.operationCalls.map { it.first })
-        assertEquals("boom-device-b", result.deviceResults[1].error)
-        assertTrue(result.deviceResults[2].success)
+        assertEquals(setOf("device-a", "device-b", "device-c"), gateway.operationCalls.map { it.first }.toSet())
+        assertEquals("boom-device-b", result.deviceResults.first { it.deviceId == "device-b" }.error)
+        assertTrue(result.deviceResults.first { it.deviceId == "device-a" }.success)
+        assertTrue(result.deviceResults.first { it.deviceId == "device-c" }.success)
     }
 
     @Test
@@ -277,20 +253,47 @@ class GroupLockControllerTest {
         assertEquals(GroupState.MIXED, aggregateGroupState(listOf(LockState.LOCKED, LockState.UNLOCKED)))
         assertEquals(GroupState.UNKNOWN, aggregateGroupState(listOf(LockState.LOCKED, LockState.UNKNOWN)))
         assertEquals(GroupState.UNKNOWN, aggregateGroupState(listOf(LockState.UNLOCKED, LockState.UNKNOWN)))
-        assertEquals(
-            GroupState.UNKNOWN,
-            aggregateGroupState(listOf(LockState.LOCKED, LockState.UNLOCKED, LockState.UNKNOWN)),
-        )
+        assertEquals(GroupState.UNKNOWN, aggregateGroupState(listOf(LockState.LOCKED, LockState.UNLOCKED, LockState.UNKNOWN)))
         assertEquals(GroupState.UNKNOWN, aggregateGroupState(listOf(LockState.UNKNOWN, LockState.UNKNOWN)))
     }
 
-    private fun controller(gateway: GroupLockGateway) = GroupLockController(
-        gateway = gateway,
-        interDeviceDelayMs = 500L,
-        delayBetweenDevices = { },
-    )
+    private fun controller(gateway: GroupLockGateway) = GroupLockController(gateway)
 
     private fun GroupOperationResult.operationResultsAreEmpty(): Boolean = deviceResults.isEmpty()
+
+    private class ParallelStartGateway(private val expectedStarts: Int) : GroupLockGateway {
+        val started = mutableListOf<String>()
+        val allStarted = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+
+        override suspend fun operate(deviceId: String, action: GroupLockAction): DeviceOperationResult {
+            started += deviceId
+            if (started.size == expectedStarts) allStarted.complete(Unit)
+            allStarted.await()
+            release.await()
+            return DeviceOperationResult(deviceId, true)
+        }
+
+        override suspend fun getState(deviceId: String) = LockState.UNKNOWN
+        override suspend fun getDeviceSnapshot(deviceId: String) = EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false)
+    }
+
+    private class FailureAndBlockingPeerGateway(private val failingDevice: String) : GroupLockGateway {
+        val peerStarted = CompletableDeferred<Unit>()
+        val releasePeer = CompletableDeferred<Unit>()
+        var peerCompleted = false
+
+        override suspend fun operate(deviceId: String, action: GroupLockAction): DeviceOperationResult {
+            if (deviceId == failingDevice) return DeviceOperationResult(deviceId, false, "failed")
+            peerStarted.complete(Unit)
+            releasePeer.await()
+            peerCompleted = true
+            return DeviceOperationResult(deviceId, true)
+        }
+
+        override suspend fun getState(deviceId: String) = LockState.UNKNOWN
+        override suspend fun getDeviceSnapshot(deviceId: String) = EntranceDeviceSnapshot(LockState.UNKNOWN, fresh = false)
+    }
 
     private class FakeGateway(
         initialStates: MutableMap<String, LockState>,
@@ -309,9 +312,7 @@ class GroupLockControllerTest {
             block?.await()
             operationCalls += deviceId to action
 
-            if (deviceId in throwOn) {
-                throw IllegalStateException("boom-$deviceId")
-            }
+            if (deviceId in throwOn) throw IllegalStateException("boom-$deviceId")
 
             failures[deviceId]?.let { error ->
                 return DeviceOperationResult(
@@ -328,7 +329,6 @@ class GroupLockControllerTest {
         }
 
         override suspend fun getState(deviceId: String): LockState = states[deviceId] ?: LockState.UNKNOWN
-
         override suspend fun getDeviceSnapshot(deviceId: String): EntranceDeviceSnapshot =
             EntranceDeviceSnapshot(states[deviceId] ?: LockState.UNKNOWN, fresh = false)
 
