@@ -41,7 +41,7 @@
             android:layout_height="96dp"
             android:layout_marginTop="4dp"
             android:gravity="center"
-            android:text="?\n不明"
+            android:text="?"
             android:textSize="24sp"
             android:visibility="gone" />
 
