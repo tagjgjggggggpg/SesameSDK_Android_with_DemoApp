@@ -1,0 +1,67 @@
+name: Phase 3 Phone and Wear Debug APKs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/sesame-group-phase3
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Restore stable Phase 2 debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: sesame-phase2-debug-keystore-v1
+      - name: Test and build Phase 3 phone and Wear APKs
+        run: |
+          chmod +x gradlew
+          ./gradlew :sesame-sdk:testDebugUnitTest :app:testDebugUnitTest :wear:testDebugUnitTest :sesame-sdk:assembleDebug :app:assembleDebug :wear:assembleDebug --stacktrace
+      - name: Verify application IDs and debug signer certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          PHONE_APK="app/build/outputs/apk/debug/app-debug.apk"
+          WEAR_APK="wear/build/outputs/apk/debug/wear-debug.apk"
+          APKANALYZER="$(command -v apkanalyzer || true)"
+          if [ -z "$APKANALYZER" ]; then
+            APKANALYZER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name apkanalyzer | head -n 1)"
+          fi
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKANALYZER"
+          test -x "$APKSIGNER"
+          PHONE_ID="$($APKANALYZER manifest application-id "$PHONE_APK")"
+          WEAR_ID="$($APKANALYZER manifest application-id "$WEAR_APK")"
+          EXPECTED_ID="co.candyhouse.sesame2.phase2debug"
+          test "$PHONE_ID" = "$EXPECTED_ID"
+          test "$WEAR_ID" = "$EXPECTED_ID"
+          PHONE_CERT="$($APKSIGNER verify --print-certs "$PHONE_APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}')"
+          WEAR_CERT="$($APKSIGNER verify --print-certs "$WEAR_APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}')"
+          test -n "$PHONE_CERT"
+          test "$PHONE_CERT" = "$WEAR_CERT"
+          mkdir -p phase3-artifacts
+          cp "$PHONE_APK" phase3-artifacts/phone-debug.apk
+          cp "$WEAR_APK" phase3-artifacts/wear-debug.apk
+          {
+            echo "head_sha=$GITHUB_SHA"
+            echo "phone_application_id=$PHONE_ID"
+            echo "wear_application_id=$WEAR_ID"
+            echo "signer_certificate_sha256=$PHONE_CERT"
+            sha256sum phase3-artifacts/phone-debug.apk
+            sha256sum phase3-artifacts/wear-debug.apk
+          } | tee phase3-artifacts/verification.txt
+      - name: Upload Phase 3 debug APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sesame-phase3-debug-apks
+          path: phase3-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
