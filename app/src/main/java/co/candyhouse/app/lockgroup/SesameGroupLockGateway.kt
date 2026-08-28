@@ -139,5 +139,5 @@ internal class SesameGroupLockGateway(private val runtime: SesameGroupLockRuntim
     private fun liveState(device:CHDevices):LockState=when((device as? CHSesame5StrictLock)?.liveBleSnapshot()?.lockState){CHSesame5LiveLockState.LOCKED->LockState.LOCKED;CHSesame5LiveLockState.UNLOCKED->LockState.UNLOCKED;null->LockState.UNKNOWN}
     private suspend fun awaitCommand(block:(CHResult<CHEmpty>)->Unit):CommandOutcome=suspendCancellableCoroutine{c->try{block(callback@{r->if(!c.isActive)return@callback;r.fold(onSuccess={c.resume(CommandOutcome.Success)},onFailure={c.resume(CommandOutcome.Failure(it))})})}catch(e:CancellationException){c.cancel(e)}catch(e:Throwable){if(c.isActive)c.resume(CommandOutcome.Failure(e))}}
     private sealed interface CommandOutcome{data object Success:CommandOutcome;data class Failure(val error:Throwable):CommandOutcome}
-    companion object{internal const val TARGET_NOT_CONFIRMED_ERROR="command accepted but target state was not confirmed";private const val COMMAND_TIMEOUT_MS=8_000L;private const val STATE_OBSERVE_TIMEOUT_MS=1_500L;private const val STATE_POLL_MS=50L}
+    companion object{internal const val TARGET_NOT_CONFIRMED_ERROR="command accepted but target state was not confirmed";private const val COMMAND_TIMEOUT_MS=8_000L;internal const val STATE_OBSERVE_TIMEOUT_MS=3_000L;private const val STATE_POLL_MS=50L}
 }

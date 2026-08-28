@@ -9,7 +9,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.service.quicksettings.TileService
-import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import co.candyhouse.app.R
@@ -63,7 +62,9 @@ internal fun wearResponseFromOperation(commandId: String, groupId: String, resul
         "BUSY" -> "処理中です"
         else -> "状態確認不能"
     }
-    fun deviceResult(index: Int): String = result?.deviceResults?.getOrNull(index)?.let { if (it.success) "SUCCESS" else "FAILURE" } ?: "NONE"
+    fun deviceResult(index: Int): String = result?.deviceResults?.getOrNull(index)?.let {
+        if (it.success) "SUCCESS" else "FAILURE"
+    } ?: "NONE"
     return WearGroupProtocol.Response(
         commandId = commandId,
         groupId = groupId,
@@ -91,7 +92,9 @@ class EntranceGroupOperationService : Service() {
         }
 
         startForeground(FOREGROUND_NOTIFICATION_ID, notification("玄関の状態を確認しています"))
-        if (command == EntranceGroupCommand.REFRESH_STATE) EntranceGroupWidgetProvider.showStatus(this, "確認中…")
+        if (command == EntranceGroupCommand.REFRESH_STATE) {
+            EntranceGroupWidgetProvider.showStatus(this, "確認中…")
+        }
 
         scope.launch {
             val group = SharedPreferencesLockGroupStore().getGroup(SharedPreferencesLockGroupStore.DEFAULT_GROUP_ID)
@@ -110,7 +113,6 @@ class EntranceGroupOperationService : Service() {
                 WearGroupStateSync.publish(this@EntranceGroupOperationService, snapshot)
                 processFreshBatteryAlerts(group, snapshot)
                 refreshTile()
-                Toast.makeText(this@EntranceGroupOperationService, message, Toast.LENGTH_SHORT).show()
                 finishStart(startId)
                 return@launch
             }
@@ -131,20 +133,20 @@ class EntranceGroupOperationService : Service() {
             )
             processFreshBatteryAlerts(group, initial)
 
-            val post = if (result == null) initial else runCatching {
-                controller.getEntranceStateSnapshot(group)
-            }.getOrElse { unknownSnapshot() }
+            val postRaw = if (result == null) {
+                initial
+            } else {
+                runCatching { controller.getEntranceStateSnapshot(group) }.getOrElse { unknownSnapshot() }
+            }
+            val postDisplay = EntranceGroupWidgetProvider.failClosedPostOperationSnapshot(result, postRaw)
             val message = resultText(result)
-            EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService, post, message)
-            WearGroupStateSync.publish(this@EntranceGroupOperationService, post)
-            processFreshBatteryAlerts(group, post)
+            EntranceGroupWidgetProvider.updateAll(this@EntranceGroupOperationService, postDisplay, message)
+            WearGroupStateSync.publish(this@EntranceGroupOperationService, postDisplay)
+            processFreshBatteryAlerts(group, postRaw)
             refreshTile()
 
             if (command == EntranceGroupCommand.WEAR_ONE_BUTTON) {
                 sendWearResult(intent, result)
-            } else {
-                Toast.makeText(this@EntranceGroupOperationService, message, Toast.LENGTH_LONG).show()
-                if (result != null && result.status != GroupOperationStatus.SUCCESS) notifyFailure(message)
             }
             finishStart(startId)
         }
@@ -223,20 +225,6 @@ class EntranceGroupOperationService : Service() {
         .setOngoing(true)
         .build()
 
-    private fun notifyFailure(text: String) {
-        runCatching {
-            getSystemService(NotificationManager::class.java).notify(
-                RESULT_NOTIFICATION_ID,
-                NotificationCompat.Builder(this, CHANNEL_ID)
-                    .setSmallIcon(R.drawable.small_icon)
-                    .setContentTitle("SESAME 玄関")
-                    .setContentText(text)
-                    .setAutoCancel(true)
-                    .build(),
-            )
-        }
-    }
-
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -258,7 +246,6 @@ class EntranceGroupOperationService : Service() {
         private const val CHANNEL_ID = "entrance_group_operation"
         private const val BATTERY_PREFS = "entrance_low_battery_alerts"
         private const val FOREGROUND_NOTIFICATION_ID = 41020
-        private const val RESULT_NOTIFICATION_ID = 41021
         private const val LOW_BATTERY_NOTIFICATION_BASE = 41040
         internal const val EXTRA_WEAR_SOURCE_NODE = "wear_source_node"
         internal const val EXTRA_WEAR_COMMAND_ID = "wear_command_id"
