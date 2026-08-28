@@ -38,7 +38,7 @@ class SesameGroupLockGatewayTest {
         assertEquals(LockState.LOCKED,s.deviceA.state);assertEquals(LockState.UNLOCKED,s.deviceB.state);assertEquals(SnapshotConfirmation.FULL,s.confirmation);assertEquals(0,a.strictLockCalls+a.strictUnlockCalls+b.strictLockCalls+b.strictUnlockCalls);assertNoUnsafeFallback(a);assertNoUnsafeFallback(b);assertEquals(0,rt.historyTagCalls);assertEquals(1,rt.finishCalls)
     }
     @Test fun refresh_partialLiveState_marksOtherDeviceUnknown_andSendsZeroCommands() = runBlocking {
-        val a=FakeStrictSesame5Device(CHDeviceStatus.Locked);val b=FakeStrictSesame5Device(CHDeviceStatus.NoBleSignal).apply{liveValid=false};val rt=FakeRuntime(mapOf("a" to a,"b" to b),transportReady=false,loginError="not available");val g=SesameGroupLockGateway(rt,5L,1L)
+        val a=FakeStrictSesame5Device(CHDeviceStatus.Locked);val b=FakeStrictSesame5Device(CHDeviceStatus.NoBleSignal).apply{liveValid=false};val rt=FakeRuntime(mapOf("a" to a,"b" to b),transportReady=true);val g=SesameGroupLockGateway(rt,5L,1L)
         val s=g.refreshEntranceStateSnapshot(LockGroup("e","玄関",listOf("a","b")))
         assertEquals(LockState.LOCKED,s.deviceA.state);assertEquals(LockState.UNKNOWN,s.deviceB.state);assertEquals(SnapshotConfirmation.PARTIAL,s.confirmation);assertEquals(0,a.strictLockCalls+a.strictUnlockCalls+b.strictLockCalls+b.strictUnlockCalls);assertNoUnsafeFallback(a);assertNoUnsafeFallback(b)
     }
