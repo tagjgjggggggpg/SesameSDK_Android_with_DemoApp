@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@android:color/white" android:gravity="center_horizontal" android:orientation="vertical" android:padding="8dp">
-    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="玄関" android:textColor="@android:color/black" android:textSize="16sp" android:textStyle="bold" />
+    <FrameLayout android:layout_width="match_parent" android:layout_height="32dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_gravity="center" android:gravity="center" android:text="玄関" android:textColor="@android:color/black" android:textSize="16sp" android:textStyle="bold" />
+        <TextView android:id="@+id/entrance_widget_refresh" android:layout_width="32dp" android:layout_height="32dp" android:layout_gravity="end|center_vertical" android:background="?android:attr/selectableItemBackgroundBorderless" android:contentDescription="状態を再読み込み" android:gravity="center" android:text="↻" android:textColor="@android:color/black" android:textSize="20sp" />
+    </FrameLayout>
     <FrameLayout android:id="@+id/entrance_widget_action" android:layout_width="80dp" android:layout_height="80dp" android:layout_marginTop="2dp" android:foreground="?android:attr/selectableItemBackgroundBorderless">
         <ImageView android:id="@+id/entrance_widget_icon" android:layout_width="match_parent" android:layout_height="match_parent" android:contentDescription="玄関を操作" android:padding="6dp" android:scaleType="fitCenter" android:src="@drawable/icon_lock" />
     </FrameLayout>
